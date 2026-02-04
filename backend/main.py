@@ -85,6 +85,7 @@ class AllocationItem(BaseModel):
     workstation_id: Optional[int] # None means "Bank" (unallocated)
     position: int
     quantity: int # Pieces allocated (for fractions)
+    is_fraction: Optional[bool] = False # True if this operation was split/fractioned
 
 class PlanningSyncRequest(BaseModel):
     pso_id: int
@@ -357,6 +358,7 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
         
         new_planning = models.ProductionPlanning(
             production_order_id=po.id,
+            pso_id=data.pso_id,  # ✅ Save which PSO version was used
             version_name=data.version_name or f"Plan-{datetime.utcnow().strftime('%Y%m%d-%H%M')}",
             pulse_duration=data.pulse_duration or po.pulse_duration,
             batch_size=data.batch_size,
@@ -398,14 +400,13 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
                     print(f"⚠️ Warning: Skipping stale/invalid operation ID {alloc_item.operation_id} (Not in PSO {pso.id})")
                     continue
 
-                # Find the operation to get details if needed, or just link
+                # Create operation allocation
+                # Use frontend's is_fraction flag instead of comparing with po.quantity
                 op_alloc = models.OperationAllocation(
                     allocation_id=ws_alloc.id,
                     operation_id=alloc_item.operation_id,
                     executed_quantity=alloc_item.quantity,
-                    is_fractioned=True if alloc_item.quantity < po.quantity else False # Simple logic for now
-                    # Note: "quantity" in frontend seems to be Batch Quantity (TL). 
-                    # Use passed quantity.
+                    is_fractioned=alloc_item.is_fraction  # ✅ Use frontend's flag
                 )
                 db.add(op_alloc)
 
@@ -484,18 +485,30 @@ def get_published_plannings(db: Session = Depends(get_db)):
         
         ops = []
         for po in orders_with_planning:
-            # Get PSO for this product
-            pso = db.query(models.PSO).join(models.Product).filter(
-                models.Product.reference == po.product_reference
-            ).order_by(desc(models.PSO.id)).first()
-            
-            if not pso:
-                continue
-            
             # Get all plannings for this PO
             plannings = db.query(models.ProductionPlanning).filter(
                 models.ProductionPlanning.production_order_id == po.id
             ).order_by(desc(models.ProductionPlanning.created_at)).all()
+            
+            if not plannings:
+                continue
+            
+            # Group plannings by PSO to show under each PSO version
+            # For the OP card, use the PSO from the first/most recent planning
+            first_planning = plannings[0]
+            main_pso = None
+            
+            if first_planning.pso_id:
+                main_pso = db.query(models.PSO).filter(models.PSO.id == first_planning.pso_id).first()
+            
+            # Fallback: if no pso_id, get latest PSO for product
+            if not main_pso:
+                main_pso = db.query(models.PSO).join(models.Product).filter(
+                    models.Product.reference == po.product_reference
+                ).order_by(desc(models.PSO.id)).first()
+            
+            if not main_pso:
+                continue
             
             versions = []
             for idx, planning in enumerate(reversed(plannings)):
@@ -503,8 +516,12 @@ def get_published_plannings(db: Session = Depends(get_db)):
                     models.WorkstationAllocation.planning_id == planning.id
                 ).distinct().count()
                 
+                # ✅ Get the PSO that was used in THIS specific planning
+                version_pso_id = planning.pso_id if planning.pso_id else main_pso.id
+                
                 versions.append({
                     "planning_id": planning.id,
+                    "pso_id": version_pso_id,  # ✅ ADDED: Each version has its own pso_id
                     "version_number": idx + 1,
                     "version_name": planning.version_name,
                     "notes": planning.notes,
@@ -515,9 +532,9 @@ def get_published_plannings(db: Session = Depends(get_db)):
                 })
             
             ops.append({
-                "pso_id": pso.id,
-                "product_reference": pso.product.reference,
-                "product_description": pso.product.description,
+                "pso_id": main_pso.id,  # Main PSO for the card header
+                "product_reference": main_pso.product.reference,
+                "product_description": main_pso.product.description,
                 "version_count": len(versions),
                 "versions": list(reversed(versions))  # Newest first
             })
@@ -552,10 +569,16 @@ def get_planning_detail(planning_id: int, db: Session = Depends(get_db)):
         if not po:
             raise HTTPException(status_code=404, detail="Production order not found")
         
-        # Get PSO
-        pso = db.query(models.PSO).join(models.Product).filter(
-            models.Product.reference == po.product_reference
-        ).order_by(desc(models.PSO.id)).first()
+        # ✅ Use the PSO that was saved in the planning (instead of latest PSO)
+        pso = None
+        if planning.pso_id:
+            pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
+        
+        # Fallback: If pso_id is not set (old data), try to find by product reference
+        if not pso:
+            pso = db.query(models.PSO).join(models.Product).filter(
+                models.Product.reference == po.product_reference
+            ).order_by(desc(models.PSO.id)).first()
         
         # Calculate version number
         all_plannings = db.query(models.ProductionPlanning).filter(
@@ -601,6 +624,58 @@ def get_planning_detail(planning_id: int, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         print(f"Error getting planning detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/planning/{planning_id}")
+def delete_planning(planning_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a specific planning version and all its allocations.
+    Used when user wants to remove a published balancing.
+    """
+    try:
+        # Get the planning
+        planning = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.id == planning_id
+        ).first()
+        
+        if not planning:
+            raise HTTPException(status_code=404, detail="Planning not found")
+        
+        # Store info for response
+        version_name = planning.version_name
+        
+        # Delete operation allocations first (cascade from workstation allocations)
+        workstation_allocs = db.query(models.WorkstationAllocation).filter(
+            models.WorkstationAllocation.planning_id == planning_id
+        ).all()
+        
+        for ws_alloc in workstation_allocs:
+            # Delete operation allocations for this workstation
+            db.query(models.OperationAllocation).filter(
+                models.OperationAllocation.allocation_id == ws_alloc.id
+            ).delete()
+        
+        # Delete workstation allocations
+        db.query(models.WorkstationAllocation).filter(
+            models.WorkstationAllocation.planning_id == planning_id
+        ).delete()
+        
+        # Finally delete the planning itself
+        db.delete(planning)
+        db.commit()
+        
+        return {
+            "status": "deleted",
+            "message": f"Balanceamento '{version_name}' excluído com sucesso",
+            "planning_id": planning_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error deleting planning: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -493,7 +493,7 @@
                                             </div>
                                             <div class="space-y-2">
                                                 ${op.versions.map(v => `
-                                                    <button onclick="loadBalanceVersion(${op.pso_id}, ${v.planning_id})" 
+                                                     <button onclick="loadBalanceVersion(${v.pso_id}, ${v.planning_id})" 
                                                         class="w-full text-left bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-purple-500 rounded-lg p-3 transition-all group">
                                                         <div class="flex justify-between items-center">
                                                             <div class="flex-1">
@@ -505,6 +505,11 @@
                                                                     <span class="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs font-bold rounded">v${v.version_number}</span>
                                                                     <p class="text-xs text-gray-600 mt-1">${new Date(v.created_at).toLocaleDateString('pt-BR')}</p>
                                                                 </div>
+                                                                <button onclick="event.stopPropagation(); deleteBalancing(${v.planning_id}, '${v.version_name || `Versão ${v.version_number}`}')" 
+                                                                    class="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg border border-red-500/20 hover:border-red-500/40 transition-all"
+                                                                    title="Excluir balanceamento">
+                                                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                                                </button>
                                                                 <span class="material-symbols-outlined text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
                                                             </div>
                                                         </div>
@@ -597,6 +602,40 @@
                 console.error('Error loading balance version:', error);
                 alert('Erro ao carregar versão do balanceamento');
                 showEmptyState();
+            }
+        }
+
+        async function deleteBalancing(planningId, versionName) {
+            // Confirm deletion
+            if (!confirm(`Tem certeza que deseja excluir o balanceamento "${versionName}"?\n\nEsta ação não pode ser desfeita.`)) {
+                return;
+            }
+
+            try {
+                console.log(`🗑️ Excluindo balanceamento ${planningId}...`);
+
+                const response = await fetch(`${API_URL}/planning/${planningId}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`✅ ${result.message}`);
+
+                    // Close and reopen modal to refresh the list
+                    closeLoadBalanceModal();
+
+                    // Small delay to allow modal to close
+                    setTimeout(() => {
+                        loadPublishedBalance();
+                    }, 200);
+                } else {
+                    alert(`❌ Erro ao excluir: ${result.detail || 'Erro desconhecido'}`);
+                }
+            } catch (error) {
+                console.error('Error deleting balancing:', error);
+                alert(`❌ Erro de conexão: ${error.message}`);
             }
         }
 
@@ -776,6 +815,106 @@
             document.getElementById('fraction-time-result').innerText = timeResult.toFixed(2);
         }
 
+        function undoFraction(btnElement) {
+            // Get the fraction card that was clicked
+            const fractionCard = btnElement.closest('.op-card');
+            const opSeq = parseInt(fractionCard.dataset.id);
+
+            // Find ALL cards with this operation sequence across all workstations
+            const allCardsWithSameOp = Array.from(document.querySelectorAll(`.op-card[data-id="${opSeq}"]`));
+
+            if (allCardsWithSameOp.length !== 2) {
+                console.warn(`Expected 2 cards for operation #${opSeq}, found ${allCardsWithSameOp.length}`);
+                // If there's only 1 card, just restore it to normal state
+                if (allCardsWithSameOp.length === 1) {
+                    const card = allCardsWithSameOp[0];
+                    card.dataset.qty = state.tl;
+                    card.dataset.isFrac = "false";
+
+                    // Restore original border class based on machine type
+                    const op = state.ops.find(o => o.seq === opSeq);
+                    if (op) {
+                        const machineClass = `border-${op.machine}`;
+                        card.className = card.className.replace('op-fraction', machineClass);
+
+                        // Update label to remove (FRAÇÃO) or (ORIGINAL)
+                        card.querySelector('.flex span:first-child').innerText = `#${opSeq}`;
+
+                        // Update quantities
+                        const newTotalTime = ((op.time * state.tl) / 60).toFixed(2);
+                        card.querySelector('.text-right p:last-child').innerText = `Sub: ${newTotalTime} min`;
+                        card.querySelector('.mt-2 p:last-child').innerText = `${state.tl} pç`;
+
+                        // Remove DESFAZER button
+                        const undoBtn = card.querySelector('button[onclick*="undoFraction"]');
+                        if (undoBtn) undoBtn.remove();
+                    }
+                }
+                updateCalculations();
+                renderBank();
+                return;
+            }
+
+            // Find which is the original and which is the fraction
+            // The original should have "(ORIGINAL)" label, fraction has "(FRAÇÃO)"
+            let originalCard = null;
+            let fractionCardToRemove = null;
+
+            allCardsWithSameOp.forEach(card => {
+                const label = card.querySelector('.flex span:first-child').innerText;
+                if (label.includes('(ORIGINAL)')) {
+                    originalCard = card;
+                } else if (label.includes('(FRAÇÃO)')) {
+                    fractionCardToRemove = card;
+                }
+            });
+
+            // If we can't determine by label, use the clicked card as fraction
+            if (!fractionCardToRemove) {
+                fractionCardToRemove = fractionCard;
+                originalCard = allCardsWithSameOp.find(c => c !== fractionCard);
+            }
+
+            if (!originalCard) {
+                console.error('Could not find original card for operation #' + opSeq);
+                return;
+            }
+
+            // Get operation data
+            const op = state.ops.find(o => o.seq === opSeq);
+            if (!op) {
+                console.error('Operation not found in state');
+                return;
+            }
+
+            // Restore original card to normal state (full TL quantity, no fraction markers)
+            originalCard.dataset.qty = state.tl;
+            originalCard.dataset.isFrac = "false";
+
+            // Restore original border class based on machine type
+            const machineClass = `border-${op.machine}`;
+            originalCard.className = originalCard.className.replace('op-fraction', machineClass);
+
+            // Update label to remove (ORIGINAL)
+            originalCard.querySelector('.flex span:first-child').innerText = `#${opSeq}`;
+
+            // Update quantities
+            const newTotalTime = ((op.time * state.tl) / 60).toFixed(2);
+            originalCard.querySelector('.text-right p:last-child').innerText = `Sub: ${newTotalTime} min`;
+            originalCard.querySelector('.mt-2 p:last-child').innerText = `${state.tl} pç`;
+
+            // Remove DESFAZER button from original card
+            const undoBtn = originalCard.querySelector('button[onclick*="undoFraction"]');
+            if (undoBtn) undoBtn.remove();
+
+            // Remove the fraction card
+            fractionCardToRemove.remove();
+
+            // Update calculations and bank
+            updateCalculations();
+            renderBank();
+        }
+
         function closeModal() { document.getElementById('fraction-modal').classList.add('hidden'); }
 
         function resetBalance() {
@@ -935,6 +1074,42 @@
             await saveBalancing(finalVersionName, versionNotes);
         }
 
+        function checkAndSave() {
+            // Validate if there's a PSO loaded
+            if (!state.loadedPsoId) {
+                alert('⚠️ Nenhuma OP carregada! Abra uma OP antes de publicar.');
+                return;
+            }
+
+            // Check if there are any allocated operations
+            let hasAllocations = false;
+            state.activeSeamstresses.forEach((seamstress, index) => {
+                const wsElement = document.getElementById(`ws-${index}`);
+                const cards = wsElement.querySelectorAll('.op-card');
+                if (cards.length > 0) {
+                    hasAllocations = true;
+                }
+            });
+
+            if (!hasAllocations) {
+                alert('⚠️ Nenhuma operação foi alocada! Distribua operações nas costureiras antes de publicar.');
+                return;
+            }
+
+            // Prompt for version name and notes
+            const versionName = prompt('📝 Nome do balanceamento:', `Bal_${state.productReference || 'versao'}`);
+
+            if (versionName === null) {
+                // User cancelled
+                return;
+            }
+
+            const versionNotes = prompt('📋 Observações (opcional):');
+
+            // Save with provided name and notes
+            saveBalancing(versionName.trim() || state.productReference, versionNotes ? versionNotes.trim() : '');
+        }
+
         async function saveBalancing(versionName = '', versionNotes = '') {
             const allocations = [];
 
@@ -952,7 +1127,8 @@
                         operation_id: parseInt(dbId),
                         workstation_id: seamstress.id,
                         position: pos + 1,
-                        quantity: parseInt(card.dataset.qty)
+                        quantity: parseInt(card.dataset.qty),
+                        is_fraction: card.dataset.isFrac === "true"  // ✅ Pass fractioning info to backend
                     });
                 });
             });

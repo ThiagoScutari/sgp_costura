@@ -61,6 +61,7 @@ class ProductionPlanning(Base):
     __tablename__ = "production_planning"
     id = Column(Integer, primary_key=True, index=True)
     production_order_id = Column(Integer, ForeignKey("production_orders.id"))
+    pso_id = Column(Integer, ForeignKey("pso.id"))  # ✅ Track which PSO version was used
     version_name = Column(String)
     notes = Column(String)
     pulse_duration = Column(Integer)
@@ -71,6 +72,7 @@ class ProductionPlanning(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     allocations = relationship("WorkstationAllocation", back_populates="planning")
+    pso = relationship("PSO")  # ✅ Relationship to PSO
 
 class WorkstationAllocation(Base):
     """
