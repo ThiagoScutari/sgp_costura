@@ -24,6 +24,27 @@ def run_migrations():
         except Exception as e:
             print(f"Error checking production_planning columns: {e}")
 
+        # --- SPRINT 13 MIGRATIONS ---
+        try:
+            conn.execute(text("ALTER TABLE seamstresses ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
+            print("Verified/Added is_active to seamstresses")
+        except Exception as e:
+            print(f"Error checking seamstresses columns: {e}")
+
+        try:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS system_config (key VARCHAR PRIMARY KEY, value VARCHAR)"))
+            print("Verified/Created system_config table")
+        except Exception as e:
+            print(f"Error checking system_config: {e}")
+
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR DEFAULT 'operator'"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
+            print("Verified/Added role/is_active to users")
+        except Exception as e:
+            print(f"Error checking users columns: {e}")
+        # ---------------------------
+
         conn.commit()
         print("Migration check complete.")
 

@@ -43,6 +43,7 @@ class Seamstress(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     status = Column(String, default="Ativa")
+    is_active = Column(Boolean, default=True) # ✅ Sprint 13: Active/Inactive status
     allocations = relationship("WorkstationAllocation", back_populates="seamstress")
 
 class ProductionOrder(Base):
@@ -148,3 +149,12 @@ class ProductionEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     planning = relationship("ProductionPlanning")
+
+class SystemConfig(Base):
+    """
+    Tabela: SYSTEM_CONFIG (Configurações Gerais)
+    Stores dynamic configs like SHIFT_CONFIG as JSON string.
+    """
+    __tablename__ = "system_config"
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String) # JSON payload

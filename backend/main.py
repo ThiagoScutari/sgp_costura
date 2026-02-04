@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -19,6 +20,9 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SGP Costura API - Sprint 7.0")
 
+# Mount static files
+app.mount("/telas", StaticFiles(directory="telas"), name="telas")
+
 # Enable CORS for Frontend Development - MUST be before routes
 app.add_middleware(
     CORSMiddleware,
@@ -28,36 +32,49 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-# Shift Configuration
-SHIFT_CONFIG = {
-    "start_time": "07:00",
-    "end_time": "17:00",
-    "lunch_start": "12:00",
-    "lunch_end": "13:00"
-}
+import json # Added import
 
-def calculate_working_minutes(start_dt: datetime, end_dt: datetime) -> float:
+# ... (Imports remain, just ensuring json is there)
+
+# Shift Configuration Helper
+def get_shift_config(db: Session):
+    config_entry = db.query(models.SystemConfig).filter(models.SystemConfig.key == "SHIFT_CONFIG").first()
+    if config_entry:
+        return json.loads(config_entry.value)
+    # Default Config
+    return {
+        "start_time": "07:00",
+        "end_time": "17:00",
+        "breaks": [
+            {"start": "12:00", "end": "13:00"}
+        ]
+    }
+
+def calculate_working_minutes(db: Session, start_dt: datetime, end_dt: datetime) -> float:
     """
     Calculate actual working minutes between two datetimes,
-    excluding lunch breaks that fall within the period.
+    using dynamic configuration from DB.
     """
     total_minutes = (end_dt - start_dt).total_seconds() / 60
     
-    # --- Smart Shift Logic ---
-    # Define Breaks: (Start Time, End Time)
-    breaks = [
-        (time(12, 0), time(13, 0)),   # Almoço
-        (time(16, 0), time(16, 15)),  # Café da Tarde (Exemplo)
-    ]
+    config = get_shift_config(db)
+    breaks_config = config.get("breaks", [])
     
-    for b_start, b_end in breaks:
+    # Parse dynamic breaks
+    parsed_breaks = []
+    for brk in breaks_config:
+        try:
+            b_start = datetime.strptime(brk["start"], "%H:%M").time()
+            b_end = datetime.strptime(brk["end"], "%H:%M").time()
+            parsed_breaks.append((b_start, b_end))
+        except ValueError: 
+            continue
+
+    for b_start, b_end in parsed_breaks:
         # Check if work interval overlaps with this break
         if start_dt.time() < b_end and end_dt.time() > b_start:
             
             # CRITICAL FIX for "Production During Break":
-            # Only deduct the break if the work STARTED BEFORE the break began.
-            # If the user explicitly starts work AT 12:05 (inside break), 
-            # we assume they want to count that time (Override).
             if start_dt.time() >= b_start:
                 continue 
 
@@ -70,8 +87,6 @@ def calculate_working_minutes(start_dt: datetime, end_dt: datetime) -> float:
                 datetime.combine(start_dt.date(), overlap_start)
             ).total_seconds() / 60
             
-            # Ensure we don't deduct more than the duration of the break itself (60 min/15 min)
-            # (Though the overlap calc handles this naturally)
             total_minutes -= overlap_minutes
     
     return max(total_minutes, 0)
@@ -85,8 +100,8 @@ def calculate_working_minutes_with_pauses(
     """
     Calcula os minutos trabalhados descontando almoço E pausas registradas.
     """
-    # 1. Cálculo Bruto (incluindo lógica de almoço existente)
-    total_minutes = calculate_working_minutes(start_dt, end_dt) # Chama a função original
+    # 1. Cálculo Bruto (incluindo lógica de almoço dinâmica)
+    total_minutes = calculate_working_minutes(db, start_dt, end_dt) 
     
     # 2. Buscar eventos de pausa/retorno para este planejamento
     events = db.query(models.ProductionEvent).filter(
@@ -99,27 +114,115 @@ def calculate_working_minutes_with_pauses(
     # Filter only relevant events (optimization)
     relevant_events = [e for e in events if e.created_at >= start_dt and e.created_at <= end_dt]
     
-    # But wait, a pause started BEFORE start_dt might still be active?
-    # For now, let's assume we care about pauses happening IN the window.
-    # Actually if paused before start_dt and resumed after, the window is fully paused?
-    # Let's stick to the user's logic: "Buscar eventos ... entre início e fim".
-    
     for event in relevant_events:
         if event.event_type == 'pause':
-            if not pause_start: # Only capture first pause if multiple (shouldn't happen if logic is correct)
+            if not pause_start: 
                 pause_start = event.created_at
         elif event.event_type == 'resume' and pause_start:
-            # Calcula duração da pausa e soma
             duration = (event.created_at - pause_start).total_seconds() / 60
             pause_minutes += duration
             pause_start = None
             
-    # Se ainda estiver pausado no momento do end_dt
     if pause_start and pause_start < end_dt:
         duration = (end_dt - pause_start).total_seconds() / 60
         pause_minutes += duration
 
     return max(total_minutes - pause_minutes, 0)
+
+# ... (Seeding remains the same)
+
+# ==================== System Config Endpoints ====================
+
+class ShiftConfigModel(BaseModel):
+    start_time: str
+    end_time: str
+    breaks: List[dict] # [{"start": "12:00", "end": "13:00"}]
+
+@app.post("/api/config/shift")
+def save_shift_config(config: ShiftConfigModel, db: Session = Depends(get_db)):
+    """Save shift configuration"""
+    config_json = json.dumps(config.dict())
+    
+    existing = db.query(models.SystemConfig).filter(models.SystemConfig.key == "SHIFT_CONFIG").first()
+    if existing:
+        existing.value = config_json
+    else:
+        db.add(models.SystemConfig(key="SHIFT_CONFIG", value=config_json))
+    
+    db.commit()
+    return {"message": "Configuration saved"}
+
+@app.get("/api/config/shift")
+def get_shift_config_endpoint(db: Session = Depends(get_db)):
+    """Get shift configuration"""
+    return get_shift_config(db)
+
+# ==================== Seamstress Management Endpoints ====================
+
+class SeamstressUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+@app.get("/api/seamstresses")
+def get_seamstresses(db: Session = Depends(get_db)):
+    """List all seamstresses with status"""
+    seamstresses = db.query(models.Seamstress).all()
+    return [{
+        "id": s.id, 
+        "name": s.name, 
+        "is_active": s.is_active,
+        "status": s.status 
+    } for s in seamstresses]
+
+@app.put("/api/seamstresses/{id}")
+def update_seamstress(id: int, data: SeamstressUpdate, db: Session = Depends(get_db)):
+    """Update seamstress active status"""
+    s = db.query(models.Seamstress).filter(models.Seamstress.id == id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Seamstress not found")
+    
+    if data.name:
+        s.name = data.name
+    if data.is_active is not None:
+        s.is_active = data.is_active
+        s.status = "Ativa" if data.is_active else "Inativa" 
+        
+    db.commit()
+    return {"message": "Seamstress updated"}
+
+class SeamstressCreate(BaseModel):
+    name: str
+
+@app.post("/api/seamstresses")
+def create_seamstress(data: SeamstressCreate, db: Session = Depends(get_db)):
+    """Create a new seamstress"""
+    s = models.Seamstress(name=data.name, is_active=True, status="Ativa")
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+@app.delete("/api/seamstresses/{id}")
+def delete_seamstress(id: int, db: Session = Depends(get_db)):
+    """Delete a seamstress (Protected)"""
+    s = db.query(models.Seamstress).filter(models.Seamstress.id == id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Seamstress not found")
+    
+    # Dependency Check: WorkstationAllocations
+    active_allocations = db.query(models.WorkstationAllocation).filter(
+        models.WorkstationAllocation.seamstress_id == id
+    ).first()
+    
+    if active_allocations:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete: Seamstress has active allocations in production history."
+        )
+
+    db.delete(s)
+    db.commit()
+    return {"message": "Seamstress deleted"}
 
 # Seed Seamstresses if empty
 def seed_seamstresses(db: Session):
@@ -157,6 +260,15 @@ class PlanningSyncRequest(BaseModel):
 def startup_event():
     # Basic seeding
     db = next(get_db())
+    
+    # ✅ Migration Sprint 13 (Run manually or here if lightweight)
+    # Ensure schema is up to date BEFORE accessing models
+    try:
+        from migrate_db import run_migrations
+        run_migrations()
+    except Exception as e:
+        print(f"⚠️ Error running migrations on startup: {e}")
+        
     seed_seamstresses(db)
     seed_default_user(db)
 
@@ -234,7 +346,127 @@ def register(username: str, email: str, password: str, db: Session = Depends(get
     
     return {"message": "User created successfully", "username": username}
 
+# ==================== User Management Endpoints (Sprint 13) ====================
+
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+    role: str = "operator"
+
+class UserUpdate(BaseModel):
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
+
+@app.get("/api/users")
+def get_users(db: Session = Depends(get_db)):
+    """List all users"""
+    users = db.query(models.User).all()
+    return [{"id": u.id, "username": u.username, "email": u.email, "role": u.role, "is_active": u.is_active} for u in users]
+
+@app.post("/api/users")
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    """Create new user (Admin)"""
+    from auth import get_password_hash
+    
+    if db.query(models.User).filter(models.User.username == user.username).first():
+        raise HTTPException(status_code=400, detail="Username taken")
+    
+    hashed_password = get_password_hash(user.password)
+    new_user = models.User(
+        username=user.username, 
+        email=user.email, 
+        hashed_password=hashed_password, 
+        role=user.role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"id": new_user.id, "username": new_user.username, "role": new_user.role}
+
+@app.put("/api/users/{user_id}")
+def update_user(user_id: int, user_data: UserUpdate, db: Session = Depends(get_db)):
+    """Update user role, active status or password"""
+    from auth import get_password_hash
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user_data.role:
+        user.role = user_data.role
+    if user_data.is_active is not None:
+        user.is_active = user_data.is_active
+    if user_data.password:
+        user.hashed_password = get_password_hash(user_data.password)
+        
+    db.commit()
+    return {"message": "User updated successfully"}
+
+# ==================== Seamstress Management Endpoints (Sprint 13) ====================
+
+class SeamstressUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+@app.get("/api/seamstresses")
+def get_seamstresses(db: Session = Depends(get_db)):
+    """List all seamstresses with status"""
+    # Return all, frontend decides how to show inactive ones
+    seamstresses = db.query(models.Seamstress).all()
+    return [{
+        "id": s.id, 
+        "name": s.name, 
+        "is_active": s.is_active,
+        "status": s.status # Backward compat
+    } for s in seamstresses]
+
+@app.put("/api/seamstresses/{id}")
+def update_seamstress(id: int, data: SeamstressUpdate, db: Session = Depends(get_db)):
+    """Update seamstress active status"""
+    s = db.query(models.Seamstress).filter(models.Seamstress.id == id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Seamstress not found")
+    
+    if data.name:
+        s.name = data.name
+    if data.is_active is not None:
+        s.is_active = data.is_active
+        s.status = "Ativa" if data.is_active else "Inativa" # Sync legacy field
+        
+    db.commit()
+    db.commit()
+    return {"message": "Seamstress updated"}
+
+class SeamstressCreate(BaseModel):
+    name: str
+
+@app.post("/api/seamstresses")
+def create_seamstress(data: SeamstressCreate, db: Session = Depends(get_db)):
+    """Create a new seamstress"""
+    s = models.Seamstress(name=data.name, is_active=True, status="Ativa")
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+@app.delete("/api/seamstresses/{id}")
+def delete_seamstress(id: int, db: Session = Depends(get_db)):
+    """Delete a seamstress"""
+    s = db.query(models.Seamstress).filter(models.Seamstress.id == id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Seamstress not found")
+    
+    # Check for dependencies (allocations) - Optional: could block if has history
+    # For now, we allow delete as requested.
+    db.delete(s)
+    db.commit()
+    return {"message": "Seamstress deleted"}
+
+
 # ==================== Product Endpoints ====================
+
 
 
 @app.get("/api/products")
@@ -328,8 +560,10 @@ def get_planning_setup(pso_id: Optional[int] = None, db: Session = Depends(get_d
     - Active Seamstresses
     - Operations from specified PSO (or latest if not specified)
     """
-    # 1. Get Seamstresses
-    seamstresses = db.query(models.Seamstress).filter(models.Seamstress.status == "Ativa").all()
+    # 1. Get Seamstresses (Sprint 13 - ONLY ACTIVE)
+    seamstresses = db.query(models.Seamstress).filter(
+        models.Seamstress.is_active == True
+    ).all()
     
     # 2. Get PSO (specific or latest)
     pso = None
@@ -366,6 +600,35 @@ def get_planning_setup(pso_id: Optional[int] = None, db: Session = Depends(get_d
                 "mName": op.macro_machine or "Indefinida",
                 "time": float(f"{real_time_sec:.2f}")
             })
+            
+        # --- SPRINT 13: SHIELDING CODE (CAPACITY CALCULATION) ---
+        num_active_operators = len(seamstresses)
+        
+        # Calculate total TP of the product (in minutes)
+        total_tp_minutes = sum(op['time'] for op in operations) / 60.0
+
+        if num_active_operators == 0:
+            suggested_tl = 10 
+            target_tact = 0
+            print("⚠️ Warning: No active seamstresses found for calculation.")
+        else:
+            # 2. Total Capacity (528 min * operators)
+            total_available_minutes = 528 * num_active_operators
+            
+            # 3. Suggested Batch Size (TL)
+            if total_tp_minutes > 0:
+                suggested_tl = math.floor(total_available_minutes / total_tp_minutes)
+                suggested_tl = max(1, suggested_tl) 
+            else:
+                suggested_tl = 10
+            
+            # 4. Target Tact
+            target_tact = total_tp_minutes / num_active_operators
+    else:
+        suggested_tl = 10
+        num_active_operators = len(seamstresses)
+        target_tact = 0
+
     
     return {
         "seamstresses": [{"id": s.id, "nome": s.name} for s in seamstresses],
@@ -374,7 +637,12 @@ def get_planning_setup(pso_id: Optional[int] = None, db: Session = Depends(get_d
             "product": pso.product.reference if pso else None,
             "product_reference": pso.product.reference if pso else None, # Ensure compatibility field
             "operations": operations
-        } if pso else None
+        } if pso else None,
+        "suggested_metrics": {
+            "suggested_tl": suggested_tl,
+            "target_tact": target_tact if 'target_tact' in locals() else None,
+            "active_operators": num_active_operators
+        }
     }
 
 @app.post("/api/planning/sync")
@@ -1636,7 +1904,7 @@ def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):
             # Use shift-aware calculation that excludes lunch breaks
             checkout_times = sorted([b.checkout_time for b in completed_batches])
             if len(checkout_times) >= 2:
-                elapsed_time = calculate_working_minutes(checkout_times[0], checkout_times[-1])
+                elapsed_time = calculate_working_minutes(db, checkout_times[0], checkout_times[-1])
                 
                 # Protection against division by zero
                 if elapsed_time > 0 and total_standard_minutes > 0:
@@ -1808,3 +2076,58 @@ def get_pso_analytics(pso_id: int, db: Session = Depends(get_db)):
 @app.get("/")
 def health_check():
     return {"status": "ok", "service": "SGP Costura API"}
+
+
+
+# --- CORREÇÃO OBRIGATÓRIA SPRINT 13 ---
+@app.get("/api/dashboard/active-status")
+def get_active_status(db: Session = Depends(get_db)):
+    """
+    Returns real-time status of the active planning session.
+    Used by Monitor (Tela 01) to show live efficiency.
+    """
+    planning = db.query(models.ProductionPlanning).filter(
+        models.ProductionPlanning.is_active == True
+    ).order_by(desc(models.ProductionPlanning.id)).first()
+
+    if not planning:
+        return {"status": "inactive", "efficiency": 0, "worked_minutes": 0}
+
+    # Identify start time (first event or planning creation)
+    start_event = db.query(models.ProductionEvent).filter(
+        models.ProductionEvent.planning_id == planning.id,
+        models.ProductionEvent.event_type == 'start'
+    ).order_by(models.ProductionEvent.created_at).first()
+    
+    session_start_time = start_event.created_at if start_event else planning.created_at
+    current_time = datetime.utcnow()
+
+    # --- CÁLCULO DE PAUSAS REAIS (DB) ---
+    config = get_shift_config(db)
+    try:
+        # Usa a função inteligente que desconta TODOS os intervalos do banco
+        worked_minutes = calculate_working_minutes_with_pauses(
+            db, 
+            planning.id, 
+            session_start_time, 
+            current_time
+        )
+    except Exception as e:
+        print(f"Erro no cálculo de pausas: {e}")
+        worked_minutes = (current_time - session_start_time).total_seconds() / 60
+    # ---------------------------------------
+
+    # Calculate standard time produced
+    completed_trackings = db.query(models.BatchTracking).filter(
+        models.BatchTracking.planning_id == planning.id
+    ).all()
+    
+    produced_batches = len(completed_trackings)
+    
+    return {
+        "status": "active",
+        "planning_id": planning.id,
+        "start_time": session_start_time,
+        "worked_minutes": round(worked_minutes, 2),
+        "produced_batches": produced_batches
+    }

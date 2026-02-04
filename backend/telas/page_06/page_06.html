@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGP Costura - Configurações de Sistema</title>
+
+    <link rel="stylesheet" href="../shared/theme.css">
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/layout.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400;700&display=swap"
+        rel="stylesheet" />
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f1418;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .tab-btn.active {
+            border-bottom: 4px solid #359EFF;
+            color: #359EFF;
+        }
+
+        .badge-active {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .badge-inactive {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+    </style>
+</head>
+
+<body class="p-6">
+    <div class="max-w-6xl mx-auto">
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-black tracking-tighter">CONFIGURAÇÕES</h1>
+                <p class="text-gray-500 font-bold text-sm uppercase">Gestão de ativos, usuários e jornada</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="user-display" class="text-xs font-bold text-gray-400 uppercase"></span>
+                <button onclick="logout()"
+                    class="text-red-500 hover:text-red-400 text-xs font-black uppercase">Sair</button>
+            </div>
+        </header>
+
+        <nav class="flex gap-8 border-b border-gray-800 mb-8">
+            <button onclick="switchTab('jornada')" id="btn-jornada"
+                class="tab-btn active pb-4 font-black uppercase tracking-widest text-sm transition-all">🕒 Jornada de
+                Trabalho</button>
+            <button onclick="switchTab('usuarios')" id="btn-usuarios"
+                class="tab-btn pb-4 font-black uppercase tracking-widest text-sm transition-all">👥 Gestão de
+                Usuários</button>
+            <button onclick="switchTab('costureiras')" id="btn-costureiras"
+                class="tab-btn pb-4 font-black uppercase tracking-widest text-sm transition-all">🧵 Costureiras
+                (Postos)</button>
+        </nav>
+
+        <section id="tab-jornada" class="tab-content active animate-in fade-in duration-500">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="md:col-span-1 space-y-6">
+                    <div class="bg-[#1b2227] p-6 rounded-3xl border border-gray-800">
+                        <h3 class="font-black mb-4 uppercase text-xs text-blue-500">Horário Principal</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-[10px] font-black text-gray-500 mb-1">INÍCIO DO TURNO</label>
+                                <input type="time" id="start-shift" value="07:00"
+                                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-3 font-bold text-white">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-black text-gray-500 mb-1">FIM DO TURNO</label>
+                                <input type="time" id="end-shift" value="17:00"
+                                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-3 font-bold text-white">
+                            </div>
+                            <button onclick="saveShift()"
+                                class="active-action w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl transition-all uppercase text-xs mt-4">Salvar
+                                Horários</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="md:col-span-2">
+                    <div class="bg-[#1b2227] p-6 rounded-3xl border border-gray-800">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="font-black uppercase text-xs text-blue-500">Intervalos (Pausas)</h3>
+                            <p class="text-gray-500 text-[10px] font-bold">Estes intervalos serão descontados do cálculo
+                                de eficiência.</p>
+                        </div>
+
+                        <!-- New Interval Form -->
+                        <div class="bg-[#0f1418] p-4 rounded-xl border border-gray-700 mb-4 flex gap-4 items-end">
+                            <div class="flex-1">
+                                <label class="block text-[10px] font-black text-gray-500 mb-1">INÍCIO</label>
+                                <input type="time" id="int-start"
+                                    class="w-full bg-[#1b2227] border border-gray-600 rounded-lg p-2 font-bold text-white">
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-[10px] font-black text-gray-500 mb-1">FIM</label>
+                                <input type="time" id="int-end"
+                                    class="w-full bg-[#1b2227] border border-gray-600 rounded-lg p-2 font-bold text-white">
+                            </div>
+                            <button onclick="addInterval()"
+                                class="active-action bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-black uppercase text-xs h-[42px]">
+                                Adicionar
+                            </button>
+                        </div>
+
+                        <div id="intervals-list" class="space-y-3">
+                            <!-- JS Renders here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-usuarios" class="tab-content animate-in fade-in duration-500">
+            <div class="bg-[#1b2227] rounded-3xl border border-gray-800 overflow-hidden">
+                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                    <h3 class="font-black uppercase text-xs text-blue-500">Usuários do Sistema</h3>
+                    <button onclick="openUserModal()"
+                        class="active-action bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest">Novo
+                        Usuário</button>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-[#0f1418] text-[10px] font-black text-gray-500 uppercase">
+                        <tr>
+                            <th class="p-4">Usuário</th>
+                            <th class="p-4">E-mail</th>
+                            <th class="p-4">Nível de Acesso</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-right">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body" class="divide-y divide-gray-800 font-bold text-sm">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="tab-costureiras" class="tab-content animate-in fade-in duration-500">
+            <div class="bg-[#1b2227] rounded-3xl border border-gray-800 overflow-hidden">
+                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-black uppercase text-xs text-blue-500">Capacidade Produtiva (Célula)</h3>
+                        <p class="text-gray-500 text-xs mt-1">Costureiras inativas não aparecem no Cockpit de
+                            Balanceamento.</p>
+                    </div>
+                    <button onclick="openSeamstressModal()"
+                        class="active-action bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest">Nova
+                        Costureira</button>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-[#0f1418] text-[10px] font-black text-gray-500 uppercase">
+                        <tr>
+                            <th class="p-4">Posto / Nome</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-right">Disponibilidade</th>
+                            <th class="p-4 text-right">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="seamstress-table-body" class="divide-y divide-gray-800 font-bold text-sm">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modals -->
+    <div id="user-modal"
+        class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#1b2227] w-full max-w-md rounded-3xl p-8 border border-gray-700">
+            <h2 class="text-xl font-black mb-6">NOVO USUÁRIO</h2>
+            <div class="space-y-4">
+                <input type="text" id="new-username" placeholder="Nome de Usuário"
+                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-4 font-bold text-white">
+                <input type="email" id="new-email" placeholder="E-mail"
+                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-4 font-bold text-white">
+                <select id="new-role"
+                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-4 font-bold text-white">
+                    <option value="operator">Operator (Padrão)</option>
+                    <option value="admin">Owner/Admin</option>
+                    <option value="viewer">Viewer (Apenas Leitura)</option>
+                </select>
+                <input type="password" id="new-password" placeholder="Senha Provisória"
+                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-4 font-bold text-white">
+                <div class="flex gap-3 pt-4">
+                    <button onclick="closeUserModal()"
+                        class="flex-1 bg-gray-800 py-4 rounded-xl font-black text-xs uppercase">Cancelar</button>
+                    <button onclick="saveNewUser()"
+                        class="flex-1 bg-blue-600 py-4 rounded-xl font-black text-xs uppercase">Criar Acesso</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="seamstress-modal"
+        class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#1b2227] w-full max-w-md rounded-3xl p-8 border border-gray-700">
+            <h2 class="text-xl font-black mb-6">NOVA COSTUREIRA</h2>
+            <div class="space-y-4">
+                <input type="text" id="new-seamstress-name" placeholder="Nome da Costureira / Posto"
+                    class="w-full bg-[#0f1418] border border-gray-700 rounded-xl p-4 font-bold text-white">
+                <div class="flex gap-3 pt-4">
+                    <button onclick="closeSeamstressModal()"
+                        class="flex-1 bg-gray-800 py-4 rounded-xl font-black text-xs uppercase">Cancelar</button>
+                    <button onclick="saveNewSeamstress()"
+                        class="flex-1 bg-blue-600 py-4 rounded-xl font-black text-xs uppercase">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8001/api";
+        let CURRENT_SHIFT_CONFIG = { start_time: '07:00', end_time: '17:00', breaks: [] };
+
+        function getAuthHeader() {
+            return {
+                'Authorization': 'Bearer ' + localStorage.getItem('sgp_token'),
+                'Content-Type': 'application/json'
+            };
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            document.getElementById(`btn-${tabName}`).classList.add('active');
+
+            if (tabName === 'usuarios') loadUsers();
+            if (tabName === 'costureiras') loadSeamstresses();
+        }
+
+        function logout() {
+            localStorage.removeItem('sgp_token');
+            localStorage.removeItem('sgp_user');
+            window.location.href = '../login/login.html';
+        }
+
+        // ================= JORNADA & INTERVALOS (REAL PERSISTENCE) =================
+        async function loadShiftConfig() {
+            try {
+                const res = await fetch(`${API_URL}/config/shift`, { headers: getAuthHeader() });
+                if (!res.ok) throw new Error("Falha ao carregar turno");
+                const config = await res.json();
+
+                CURRENT_SHIFT_CONFIG = config;
+                document.getElementById('start-shift').value = config.start_time;
+                document.getElementById('end-shift').value = config.end_time;
+                renderIntervals(config.breaks);
+            } catch (e) { console.error(e); }
+        }
+
+        async function saveConfigurations() {
+            const start = document.getElementById('start-shift').value;
+            const end = document.getElementById('end-shift').value;
+
+            // Envia o pacote completo para o Python
+            // Adapted to match ShiftConfigModel (breaks instead of intervals)
+            const config = {
+                start_time: start,
+                end_time: end,
+                breaks: CURRENT_SHIFT_CONFIG.breaks // Lista completa
+            };
+
+            try {
+                const res = await fetch(`${API_URL}/config/shift`, {
+                    method: 'POST',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify(config)
+                });
+
+                if (res.ok) {
+                    alert("Configuração salva! O Monitor de Eficiência agora considera estes horários.");
+                    await loadShiftConfig();
+                } else {
+                    throw new Error("Erro ao salvar");
+                }
+            } catch (e) {
+                alert("Erro: " + e.message);
+            }
+        }
+
+        // Alias for compatibility if button calls saveShift
+        const saveShift = saveConfigurations;
+
+        async function addInterval() {
+            const start = document.getElementById('int-start').value;
+            const end = document.getElementById('int-end').value;
+            if (!start || !end) return alert("Preencha horário de início e fim");
+
+            if (!CURRENT_SHIFT_CONFIG.breaks) CURRENT_SHIFT_CONFIG.breaks = [];
+            CURRENT_SHIFT_CONFIG.breaks.push({ start, end });
+
+            await persistShiftConfig(); // Save to DB
+
+            document.getElementById('int-start').value = '';
+            document.getElementById('int-end').value = '';
+            await loadShiftConfig();
+        }
+
+        async function deleteInterval(index) {
+            if (!confirm("Remover este intervalo?")) return;
+            CURRENT_SHIFT_CONFIG.breaks.splice(index, 1);
+            await persistShiftConfig();
+            await loadShiftConfig();
+        }
+
+        async function persistShiftConfig() {
+            try {
+                const res = await fetch(`${API_URL}/config/shift`, {
+                    method: 'POST',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify(CURRENT_SHIFT_CONFIG)
+                });
+                if (!res.ok) throw new Error("Erro ao salvar configuração");
+            } catch (e) {
+                alert("Erro ao salvar: " + e.message);
+                // Reload to restore sync state
+                loadShiftConfig();
+            }
+        }
+
+        function renderIntervals(breaks) {
+            const container = document.getElementById('intervals-list');
+            if (!breaks || breaks.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-xs italic">Nenhum intervalo cadastrado.</p>';
+                return;
+            }
+
+            container.innerHTML = breaks.map((b, idx) => `
+                <div class="flex justify-between items-center bg-[#0f1418] p-3 rounded-xl border border-gray-700">
+                    <span class="font-bold text-sm text-gray-300">☕ ${b.start} - ${b.end}</span>
+                    <button onclick="deleteInterval(${idx})" class="text-red-500 hover:text-red-400 font-bold text-[10px] uppercase active-action">Excluir</button>
+                </div>
+            `).join('');
+            applyRBAC();
+        }
+
+        // ================= USUÁRIOS =================
+        async function loadUsers() {
+            try {
+                const resp = await fetch(`${API_URL}/users`, { headers: getAuthHeader() });
+                const users = await resp.json();
+                const body = document.getElementById('users-table-body');
+                body.innerHTML = users.map(u => `
+                    <tr class="hover:bg-white/5 transition-colors">
+                        <td class="p-4">${u.username}</td>
+                        <td class="p-4">${u.email || '-'}</td>
+                        <td class="p-4 uppercase text-[10px] font-black text-gray-400">${u.role}</td>
+                        <td class="p-4">
+                            <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${u.is_active ? 'badge-active' : 'badge-inactive'}">
+                                ${u.is_active ? 'Ativo' : 'Bloqueado'}
+                            </span>
+                        </td>
+                        <td class="p-4 text-right">
+                            <button onclick="toggleUser(${u.id}, ${u.is_active})" class="active-action text-blue-500 hover:text-white font-black text-[10px] uppercase">
+                                ${u.is_active ? 'Bloquear' : 'Desbloquear'}
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+                applyRBAC();
+            } catch (e) { console.error(e); }
+        }
+
+        function openUserModal() { document.getElementById('user-modal').classList.remove('hidden'); }
+        function closeUserModal() { document.getElementById('user-modal').classList.add('hidden'); }
+
+        async function saveNewUser() {
+            // ... (Same logic, simple CRUD)
+            const username = document.getElementById('new-username').value;
+            const email = document.getElementById('new-email').value;
+            const password = document.getElementById('new-password').value;
+            const role = document.getElementById('new-role').value;
+
+            try {
+                const res = await fetch(`${API_URL}/users`, {
+                    method: 'POST',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify({ username, email, password, role })
+                });
+                if (!res.ok) throw await res.json();
+                alert("Usuário criado!");
+                closeUserModal();
+                loadUsers();
+            } catch (e) { alert("Erro: " + (e.detail || e)); }
+        }
+
+        async function toggleUser(id, currentStatus) {
+            if (!confirm("Confirmar alteração de status?")) return;
+            try {
+                await fetch(`${API_URL}/users/${id}`, {
+                    method: 'PUT',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify({ is_active: !currentStatus })
+                });
+                loadUsers();
+            } catch (e) { alert("Erro ao atualizar"); }
+        }
+
+        // ================= COSTUREIRAS (REAL CRUD) =================
+        async function loadSeamstresses() {
+            try {
+                const resp = await fetch(`${API_URL}/seamstresses`, { headers: getAuthHeader() });
+                const data = await resp.json();
+                const body = document.getElementById('seamstress-table-body');
+                body.innerHTML = data.map(s => `
+                    <tr class="hover:bg-white/5 transition-colors">
+                        <td class="p-4 flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center font-black text-blue-500 text-xs">${s.name.charAt(0)}</div>
+                            ${s.name}
+                        </td>
+                        <td class="p-4">
+                            <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${s.is_active ? 'badge-active' : 'badge-inactive'}">
+                                ${s.is_active ? 'Ativa' : 'Inativa'}
+                            </span>
+                        </td>
+                        <td class="p-4 text-right">
+                            <button onclick="toggleSeamstress(${s.id}, ${s.is_active})" class="active-action bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all mr-2">
+                                ${s.is_active ? 'Inativar' : 'Ativar'}
+                            </button>
+                        </td>
+                        <td class="p-4 text-right flex justify-end gap-2">
+                            <button onclick="editSeamstress(${s.id}, '${s.name}')" class="active-action text-yellow-500 hover:text-white font-black text-xs uppercase" title="Editar">✎</button>
+                            <button onclick="deleteSeamstress(${s.id})" class="active-action text-red-500 hover:text-white font-black text-xs uppercase" title="Excluir">✕</button>
+                        </td>
+                    </tr>
+                `).join('');
+                applyRBAC();
+            } catch (e) { console.error(e); }
+        }
+
+        function openSeamstressModal() { document.getElementById('seamstress-modal').classList.remove('hidden'); }
+        function closeSeamstressModal() { document.getElementById('seamstress-modal').classList.add('hidden'); }
+
+        async function saveNewSeamstress() {
+            const name = document.getElementById('new-seamstress-name').value;
+            if (!name) return alert("Digite o nome");
+
+            try {
+                const res = await fetch(`${API_URL}/seamstresses`, {
+                    method: 'POST',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify({ name })
+                });
+                if (!res.ok) throw new Error("Erro ao criar");
+                closeSeamstressModal();
+                loadSeamstresses();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function editSeamstress(id, currentName) {
+            const newName = prompt("Novo nome:", currentName);
+            if (!newName || newName === currentName) return;
+
+            try {
+                const res = await fetch(`${API_URL}/seamstresses/${id}`, {
+                    method: 'PUT',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify({ name: newName })
+                });
+                if (!res.ok) throw new Error("Erro ao editar");
+                loadSeamstresses();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function deleteSeamstress(id) {
+            if (!confirm("ATENÇÃO: Deseja realmente excluir?\nIsso falhará se ela já tiver produzido algo.")) return;
+
+            try {
+                const res = await fetch(`${API_URL}/seamstresses/${id}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeader()
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || "Erro ao excluir");
+                }
+                loadSeamstresses();
+            } catch (e) {
+                alert("Não foi possível excluir: " + e.message);
+            }
+        }
+
+        async function toggleSeamstress(id, currentStatus) {
+            // Ponto 3.1 Compliance: This status change immediately affects Cockpit
+            try {
+                const res = await fetch(`${API_URL}/seamstresses/${id}`, {
+                    method: 'PUT',
+                    headers: getAuthHeader(),
+                    body: JSON.stringify({ is_active: !currentStatus })
+                });
+                if (!res.ok) throw new Error("Falha");
+                loadSeamstresses();
+            } catch (e) { alert("Erro ao alterar status."); }
+        }
+
+        // --- RBAC & Init ---
+        function applyRBAC() {
+            const userStr = localStorage.getItem('sgp_user');
+            if (!userStr) return;
+            const user = JSON.parse(userStr);
+            const role = user.role;
+
+            if (role === 'viewer' || role === 'View') {
+                document.querySelectorAll('.active-action').forEach(b => {
+                    b.classList.add('opacity-50', 'cursor-not-allowed');
+                    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); alert("Acesso restrito (Viewer)."); }
+                });
+            }
+            document.getElementById('user-display').innerText = `${user.username} (${role})`;
+        }
+
+        window.onload = () => {
+            if (!isAuthenticated()) {
+                window.location.href = '../login/login.html';
+                return;
+            }
+            loadShiftConfig(); // Now fetches from API!
+            switchTab('jornada');
+            applyRBAC();
+        };
+    </script>
+</body>
+
+</html>
