@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, time
 from database import engine, get_db, Base
 import models
 import extractor
+import math
 
 # Re-create database tables (Note: In production this should be a migration)
 # We drop all to apply schema changes effectively for dev/sprint 0
@@ -94,6 +95,7 @@ class PlanningSyncRequest(BaseModel):
     notes: Optional[str] = None
     pulse_duration: Optional[int] = 60
     batch_size: Optional[int] = None
+    total_quantity: Optional[int] = 1000 # Default if not provided
 
 
 @app.on_event("startup")
@@ -364,7 +366,7 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
             batch_size=data.batch_size,
             notes=data.notes,
             total_operators=len({a.workstation_id for a in data.allocations if a.workstation_id is not None}),
-            is_active=True
+            is_active=False  # ✅ Default to inactive. Must be started manually in Monitor (Page 01)
         )
         db.add(new_planning)
         db.flush()
@@ -409,6 +411,37 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
                     is_fractioned=alloc_item.is_fraction  # ✅ Use frontend's flag
                 )
                 db.add(op_alloc)
+
+        # 5. Generate Batches (CartLote)
+        # Update PO quantity to match current planning
+        if data.total_quantity:
+            po.quantity = data.total_quantity
+            db.add(po)
+            
+        # Clear existing batches for this PO to avoid duplicates/ghost batches
+        db.query(models.CartLote).filter(models.CartLote.production_order_id == po.id).delete()
+        db.flush()
+
+        # Generate new batches based on total quantity and batch size
+        total_qty = data.total_quantity if data.total_quantity and data.total_quantity > 0 else 1000
+        batch_size_val = data.batch_size if data.batch_size and data.batch_size > 0 else 50
+        
+        num_lotes = math.ceil(total_qty / batch_size_val)
+        
+        for i in range(num_lotes):
+            # Calculate quantity for this specific batch
+            current_qty = batch_size_val
+            # If it's the last batch, check if it's partial
+            if (i + 1) * batch_size_val > total_qty:
+                current_qty = total_qty % batch_size_val
+            
+            new_lote = models.CartLote(
+                production_order_id=po.id,
+                sequence_number=i + 1,
+                quantity_pieces=current_qty,
+                status="Aguardando"
+            )
+            db.add(new_lote)
 
         db.commit()
         return {"status": "synced", "message": "Balanceamento publicado com sucesso!", "planning_id": new_planning.id}
@@ -679,6 +712,89 @@ def delete_planning(planning_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/production/start")
+def start_production(data: dict, db: Session = Depends(get_db)):
+    """
+    Activate a specific production planning and deactivate all others.
+    This marks the start of a production batch.
+    """
+    try:
+        planning_id = data.get("planning_id")
+        if not planning_id:
+            raise HTTPException(status_code=400, detail="planning_id is required")
+        
+        # Deactivate all current active plannings
+        db.query(models.ProductionPlanning).update({"is_active": False})
+        
+        # Activate the selected planning
+        planning = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.id == planning_id
+        ).first()
+        
+        if not planning:
+            raise HTTPException(status_code=404, detail="Planning not found")
+        
+        planning.is_active = True
+        db.commit()
+        
+        return {
+            "status": "started",
+            "message": f"Produção iniciada: {planning.version_name}",
+            "planning_id": planning_id,
+            "pso_id": planning.pso_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error starting production: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/production/active")
+def get_active_production(db: Session = Depends(get_db)):
+    """
+    Get the currently active production planning.
+    Returns null if no production is running.
+    """
+    try:
+        active_planning = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.is_active == True
+        ).first()
+        
+        if not active_planning:
+            return {"active": False, "planning": None}
+        
+        # Get PSO info
+        pso = None
+        if active_planning.pso_id:
+            pso = db.query(models.PSO).filter(
+                models.PSO.id == active_planning.pso_id
+            ).first()
+        
+        product_reference = None
+        if pso and pso.product:
+            product_reference = pso.product.reference
+        
+        return {
+            "active": True,
+            "planning": {
+                "id": active_planning.id,
+                "version_name": active_planning.version_name,
+                "pso_id": active_planning.pso_id,
+                "pso_version": pso.version_name if pso else None,
+                "product_reference": product_reference,
+                "pulse_duration": active_planning.pulse_duration,
+                "batch_size": active_planning.batch_size
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error getting active production: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- Existing Endpoints ---
 
 @app.get("/api/dashboard/active-status")
@@ -737,11 +853,17 @@ def get_dashboard_active_status(db: Session = Depends(get_db)):
 
     allocations.sort(key=lambda x: x["position"])
 
+    # Calculate total batches for this PO
+    total_batches = db.query(models.CartLote).filter(
+        models.CartLote.production_order_id == po.id
+    ).count()
+
     return {
         "status": "active",
         "product": po.product_reference if po else "Desconhecido",
         "planning_id": planning.id,
         "pulse_duration": planning.pulse_duration,
+        "total_batches": total_batches,  # ✅ Send dynamic batch count
         "current_cycle_start": start_time,
         "now_server": current_time,
         "elapsed_seconds": elapsed_seconds,

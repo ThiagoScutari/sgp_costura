@@ -66,6 +66,7 @@ class ProductionPlanning(Base):
     notes = Column(String)
     pulse_duration = Column(Integer)
     batch_size = Column(Integer)
+    total_quantity = Column(Integer, default=0)  # ✅ Configurable batch volume
     total_operators = Column(Integer)
     efficiency_factor = Column(Float, default=1.0)
     is_active = Column(Boolean, default=True)

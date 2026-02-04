@@ -216,6 +216,15 @@
             <div class="h-8 w-px bg-gray-700 mx-2"></div>
 
             <div class="flex items-center gap-6 bg-gray-900/50 px-4 py-2 rounded-2xl border border-gray-800">
+                <div class="flex flex-col border-r border-gray-800 pr-4">
+                    <label class="text-[8px] font-black uppercase text-gray-500">Qtd. Total</label>
+                    <div class="flex items-center gap-1">
+                        <input type="number" id="batch-total-quantity" value="1000" min="1"
+                            class="bg-transparent text-white font-black text-sm outline-none w-12 border-b border-gray-700 focus:border-blue-500 transition-colors text-center">
+                        <span class="text-[8px] font-black text-gray-600">PÇS</span>
+                    </div>
+                </div>
+
                 <div class="flex flex-col">
                     <label class="text-[8px] font-black uppercase text-gray-500">Pulso (Duração)</label>
                     <select id="pulse-select" onchange="updateGlobalParams()"
@@ -1075,6 +1084,16 @@
         }
 
         function checkAndSave() {
+            // Validate Total Quantity
+            const totalQtyInput = document.getElementById('batch-total-quantity');
+            const totalQuantity = totalQtyInput ? parseInt(totalQtyInput.value) : 0;
+
+            if (!totalQuantity || totalQuantity <= 0) {
+                alert('⚠️ Quantidade Total Inválida!\nPor favor, informe a quantidade total de peças no topo da tela.');
+                if (totalQtyInput) totalQtyInput.focus();
+                return;
+            }
+
             // Validate if there's a PSO loaded
             if (!state.loadedPsoId) {
                 alert('⚠️ Nenhuma OP carregada! Abra uma OP antes de publicar.');
@@ -1137,9 +1156,10 @@
                 pso_id: state.loadedPsoId,
                 pulse_duration: state.pulseDuration,
                 batch_size: state.tl,
+                total_quantity: parseInt(document.getElementById('batch-total-quantity').value) || 1000,
                 allocations: allocations,
                 version_name: versionName,  // Always send, even if empty
-                notes: versionNotes || null
+                notes: versionNotes
             };
 
             console.log('📤 Publicando balanceamento:', payload);

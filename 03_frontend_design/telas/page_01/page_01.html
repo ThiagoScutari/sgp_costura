@@ -149,50 +149,47 @@
 
         function showIdleState(data) {
             // Update header
-            document.querySelector("header h1").innerText = `SGP - Monitor: ${data.product || 'Aguardando'}`;
+            document.querySelector("header h1").innerText = `SGP - Aguardando Produção`;
             document.getElementById('current-op').innerText = 'OP: --';
 
-            // Update timer card to idle state (gray, no pulsing)
-            const timerCard = document.getElementById('timer-card');
-            const timerStatus = document.getElementById('timer-status');
-            const mainTimer = document.getElementById('main-timer');
-            const nextBatchTime = document.getElementById('next-batch-time');
+            // Hide timer card and stats
+            document.getElementById('timer-card').style.display = 'none';
+            document.querySelector('.grid').style.display = 'none';
 
-            timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-gray-700 text-white";
-            timerStatus.innerText = "AGUARDANDO INÍCIO";
-            mainTimer.innerText = "--:--";
-            nextBatchTime.innerText = "--:--";
-
-            // Update progress info
-            document.getElementById('batch-current').innerText = '0';
-            if (document.getElementById('batch-total')) {
-                document.getElementById('batch-total').innerText = '--';
-            }
-            document.getElementById('progress-bar').style.width = '0%';
-            if (document.getElementById('progress-text')) {
-                document.getElementById('progress-text').innerText = '0% do total da OP';
-            }
-
-            // Update efficiency
-            if (document.getElementById('efficiency-value')) {
-                document.getElementById('efficiency-value').innerText = '--';
-            }
-            if (document.getElementById('efficiency-delta')) {
-                document.getElementById('efficiency-delta').innerText = '--';
-            }
-            if (document.getElementById('efficiency-circle')) {
-                document.getElementById('efficiency-circle').setAttribute('stroke-dasharray', '0, 100');
-            }
-
-            // Show idle message in workstations list
+            // Show production selector if not already present
             const list = document.getElementById('cart-list');
-            list.innerHTML = `
-                <div class="text-center py-16">
-                    <span class="material-symbols-outlined text-7xl text-gray-600 mb-4 block">schedule</span>
-                    <p class="text-gray-300 font-bold text-xl mb-2">Aguardando Início de Produção</p>
-                    <p class="text-gray-500 text-sm">${data.message || 'Nenhuma OP ativa no momento'}</p>
-                </div>
-            `;
+            document.querySelector("section h3").innerText = "INICIAR PRODUÇÃO";
+
+            const existingSelector = document.getElementById('production-selector-container');
+
+            // Only render if selector doesn't exist yet
+            if (!existingSelector) {
+                list.innerHTML = `
+                    <div id="production-selector-container" class="flex flex-col items-center justify-center p-8 bg-[#1b2227] border-2 border-dashed border-gray-700 rounded-3xl">
+                        <span class="material-symbols-outlined text-5xl text-blue-500 mb-4 animate-bounce">rocket_launch</span>
+                        <h3 class="text-xl font-black text-white mb-2">PRONTO PARA INICIAR?</h3>
+                        <p class="text-gray-400 text-sm mb-6 text-center">
+                            Selecione um balanceamento publicado no Cockpit <br> 
+                            para ativar o monitoramento da célula.
+                        </p>
+                        
+                        <div class="w-full max-w-md space-y-4">
+                            <select id="planning-dropdown" 
+                                class="w-full bg-[#0f1418] border border-gray-700 text-white p-4 rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none">
+                                <option value="">Carregando planejamentos...</option>
+                            </select>
+                            
+                            <button onclick="startProductionBatch()" 
+                                class="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20">
+                                🚀 INICIAR LOTE DE PRODUÇÃO
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                // Load published plannings only once when creating the selector
+                loadPublishedPlannings();
+            }
         }
 
         function updateDashboard(data) {
@@ -290,23 +287,95 @@
             // 5. Workstation List
             const list = document.getElementById('cart-list');
             document.querySelector("section h3").innerText = "CÉLULA ATIVA (COSTUREIRAS)";
-            <div class="flex h-16 items-center justify-between rounded-xl bg-[#1b2227] border border-gray-800 px-4 mb-2">
-                <div class="flex items-center gap-3">
-                    <div class="bg-blue-500/20 text-blue-400 font-black text-xs px-2 py-1 rounded">0${ws.position || i + 1}</div>
-                    <div>
-                        <p class="text-white font-bold text-sm uppercase">${ws.seamstress_name}</p>
-                        <p class="text-gray-500 text-[10px] font-bold uppercase">${ws.load_count} Operações</p>
+
+            if (data.workstations && data.workstations.length > 0) {
+                list.innerHTML = data.workstations.map((ws, i) => `
+                    <div class="flex h-16 items-center justify-between rounded-xl bg-[#1b2227] border border-gray-800 px-4 mb-2">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-blue-500/20 text-blue-400 font-black text-xs px-2 py-1 rounded">0${ws.position || i + 1}</div>
+                            <div>
+                                <p class="text-white font-bold text-sm uppercase">${ws.seamstress_name}</p>
+                                <p class="text-gray-500 text-[10px] font-bold uppercase">${ws.load_count} Operações</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="relative flex size-2">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+                            </span>
+                            <span class="text-[10px] font-bold text-green-500 uppercase">${ws.status}</span>
+                        </div>
                     </div>
-                </div>
-                <div class="flex items-center gap-2">
-                    <span class="relative flex size-2">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
-                    </span>
-                    <span class="text-[10px] font-bold text-green-500 uppercase">${ws.status}</span>
-                </div>
-            </div>
                 `).join('');
+            } else {
+                list.innerHTML = '<p class="text-gray-500 text-center py-4">Nenhuma costureira ativa</p>';
+            }
+        }
+
+        async function loadPublishedPlannings() {
+            try {
+                const response = await fetch(`${API_URL}/planning/published`);
+                const data = await response.json();
+
+                const dropdown = document.getElementById('planning-dropdown');
+                if (!dropdown) return;
+
+                dropdown.innerHTML = '<option value="">Selecione um balanceamento...</option>';
+
+                data.ops.forEach(op => {
+                    op.versions.forEach(v => {
+                        const option = document.createElement('option');
+                        option.value = v.planning_id;
+                        option.textContent = `${op.product_reference} - ${v.version_name} (${new Date(v.created_at).toLocaleDateString('pt-BR')})`;
+                        dropdown.appendChild(option);
+                    });
+                });
+
+            } catch (error) {
+                console.error('Error loading plannings:', error);
+                const dropdown = document.getElementById('planning-dropdown');
+                if (dropdown) {
+                    dropdown.innerHTML = '<option value="">Erro ao carregar planejamentos</option>';
+                }
+            }
+        }
+
+        async function startProductionBatch() {
+            const dropdown = document.getElementById('planning-dropdown');
+            if (!dropdown) return;
+
+            const planningId = dropdown.value;
+
+            if (!planningId) {
+                alert('⚠️ Selecione um balanceamento para iniciar');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/production/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planning_id: parseInt(planningId) })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`✅ ${result.message}\n\nIniciando monitoramento...`);
+
+                    // Show timer card and stats again
+                    document.getElementById('timer-card').style.display = 'block';
+                    document.querySelector('.grid').style.display = 'grid';
+
+                    // Restart fetching immediately
+                    fetchDashboardData();
+                } else {
+                    alert(`❌ Erro: ${result.detail}`);
+                }
+
+            } catch (error) {
+                console.error('Error starting production:', error);
+                alert('❌ Erro ao iniciar produção');
             }
         }
 
