@@ -69,6 +69,30 @@
             </div>
         </div>
 
+        <!-- Control Panel -->
+        <div id="control-panel" class="grid grid-cols-3 gap-2 p-1">
+            <button id="btn-pause" onclick="pauseProduction()"
+                class="bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 py-3 rounded-xl font-black text-[10px] uppercase flex flex-col items-center gap-1 transition-all">
+                <span class="material-symbols-outlined text-sm">pause_circle</span>
+                PAUSAR
+            </button>
+            <button id="btn-resume" onclick="resumeProduction()"
+                class="hidden bg-green-500 hover:bg-green-600 text-white border border-green-500/20 py-3 rounded-xl font-black text-[10px] uppercase flex flex-col items-center gap-1 transition-all shadow-lg shadow-green-500/20">
+                <span class="material-symbols-outlined text-sm">play_circle</span>
+                CONTINUAR
+            </button>
+            <button id="btn-rebalance" onclick="rebalanceProduction()"
+                class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 py-3 rounded-xl font-black text-[10px] uppercase flex flex-col items-center gap-1 transition-all">
+                <span class="material-symbols-outlined text-sm">build_circle</span>
+                REBALANCEAR
+            </button>
+            <button id="btn-stop" onclick="stopProduction()"
+                class="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 py-3 rounded-xl font-black text-[10px] uppercase flex flex-col items-center gap-1 transition-all">
+                <span class="material-symbols-outlined text-sm">stop_circle</span>
+                PARAR
+            </button>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-[#1b2227] border border-gray-800 p-5 rounded-2xl flex items-center justify-between">
                 <div>
@@ -132,18 +156,25 @@
 
         async function fetchDashboardData() {
             try {
+                console.log("📡 Buscando dados do dashboard...");
                 const response = await fetch(`${API_URL}/dashboard/active-status`);
                 const data = await response.json();
+                console.log("📥 Dados recebidos:", data);
 
-                // Check if production is idle
-                if (data.status === 'idle') {
+                // Check if production is idle or error
+                if (!data.status || data.status === 'idle' || data.status === 'error') {
+                    console.log("⚪ Estado: INATIVO - Exibindo seletor de planejamentos");
                     showIdleState(data);
+                    currentPlanningId = null;  // Clear planning ID
                     return;
                 }
 
+                console.log("🟢 Estado: ATIVO - Atualizando dashboard");
                 updateDashboard(data);
             } catch (error) {
-                console.error("Dashboard Sync Error:", error);
+                console.error("❌ Dashboard Sync Error:", error);
+                showIdleState({status: 'idle'});
+                currentPlanningId = null;  // Clear planning ID on error
             }
         }
 
@@ -193,6 +224,22 @@
         }
 
         function updateDashboard(data) {
+            console.log("🔄 Atualizando dashboard com planning_id:", data.planning_id);
+            currentPlanningId = data.planning_id;
+            console.log("✅ currentPlanningId definido para:", currentPlanningId);
+
+            // Toggle Buttons based on Status
+            const btnPause = document.getElementById('btn-pause');
+            const btnResume = document.getElementById('btn-resume');
+
+            if (data.status === 'paused') {
+                btnPause.classList.add('hidden');
+                btnResume.classList.remove('hidden');
+            } else {
+                btnPause.classList.remove('hidden');
+                btnResume.classList.add('hidden');
+            }
+
             // 1. Header Info
             document.querySelector("header h1").innerText = `SGP - Monitor: ${data.product}`;
             document.getElementById('current-op').innerText = `OP: ${data.product}`;
@@ -223,7 +270,10 @@
             }
 
             // Update card color based on status
-            if (isDelayed) {
+            if (data.status === 'paused') {
+                timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-yellow-600 text-white animate-pulse";
+                timerStatus.innerText = "PRODUÇÃO PAUSADA";
+            } else if (isDelayed) {
                 timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-red-600 text-white animate-pulse-fast";
                 timerStatus.innerText = "ATRASADO";
             } else if (elapsed > pulseDuration * 0.8) {
@@ -314,25 +364,42 @@
 
         async function loadPublishedPlannings() {
             try {
+                console.log("📡 Carregando planejamentos publicados...");
                 const response = await fetch(`${API_URL}/planning/published`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
                 const data = await response.json();
+                console.log("✅ Planejamentos carregados:", data);
 
                 const dropdown = document.getElementById('planning-dropdown');
-                if (!dropdown) return;
+                if (!dropdown) {
+                    console.error("❌ Dropdown não encontrado!");
+                    return;
+                }
 
                 dropdown.innerHTML = '<option value="">Selecione um balanceamento...</option>';
 
+                if (!data.ops || data.ops.length === 0) {
+                    dropdown.innerHTML = '<option value="">Nenhum planejamento disponível</option>';
+                    return;
+                }
+
                 data.ops.forEach(op => {
-                    op.versions.forEach(v => {
-                        const option = document.createElement('option');
-                        option.value = v.planning_id;
-                        option.textContent = `${op.product_reference} - ${v.version_name} (${new Date(v.created_at).toLocaleDateString('pt-BR')})`;
-                        dropdown.appendChild(option);
-                    });
+                    if (op.versions && op.versions.length > 0) {
+                        op.versions.forEach(v => {
+                            const option = document.createElement('option');
+                            option.value = v.planning_id;
+                            option.textContent = `${op.product_reference} - ${v.version_name} (${new Date(v.created_at).toLocaleDateString('pt-BR')})`;
+                            dropdown.appendChild(option);
+                        });
+                    }
                 });
 
             } catch (error) {
-                console.error('Error loading plannings:', error);
+                console.error('❌ Erro ao carregar planejamentos:', error);
                 const dropdown = document.getElementById('planning-dropdown');
                 if (dropdown) {
                     dropdown.innerHTML = '<option value="">Erro ao carregar planejamentos</option>';
@@ -340,27 +407,65 @@
             }
         }
 
-        async function startProductionBatch() {
+        // Expose function to global scope explicitly
+        window.startProductionBatch = async function () {
+            console.log("🚀 Botão de iniciar clicado!");
             const dropdown = document.getElementById('planning-dropdown');
-            if (!dropdown) return;
+
+            if (!dropdown) {
+                console.error("❌ Dropdown não encontrado!");
+                alert("Erro: Dropdown de planejamentos não encontrado");
+                return;
+            }
 
             const planningId = dropdown.value;
+            console.log("📋 Planning ID selecionado:", planningId);
 
             if (!planningId) {
+                console.warn("⚠️ Nenhum planejamento selecionado");
                 alert('⚠️ Selecione um balanceamento para iniciar');
                 return;
             }
 
+            // --- Break Time Verification ---
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMin = now.getMinutes();
+            const currentTime = currentHour * 60 + currentMin;
+
+            // Define Shifts (Minutes from midnight)
+            const shifts = [
+                { name: "Almoço", start: 12 * 60, end: 13 * 60 },
+                { name: "Café da Tarde", start: 16 * 60, end: 16 * 60 + 15 }
+            ];
+
+            const activeBreak = shifts.find(s => currentTime >= s.start && currentTime < s.end);
+
+            if (activeBreak) {
+                const proceed = confirm(
+                    `⚠️ HORÁRIO DE INTERVALO DETECTADO\n\n` +
+                    `Horário configurado como: ${activeBreak.name}\n` +
+                    `Deseja iniciar a produção mesmo assim?\n\n` +
+                    `Ao clicar em OK, o tempo será contabilizado normalmente.`
+                );
+                if (!proceed) return;
+            }
+            // -------------------------------
+
             try {
+                console.log("📤 Enviando requisição para iniciar produção...", {planning_id: parseInt(planningId)});
                 const response = await fetch(`${API_URL}/production/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ planning_id: parseInt(planningId) })
                 });
 
+                console.log("📥 Resposta recebida:", response.status);
                 const result = await response.json();
+                console.log("📄 Dados da resposta:", result);
 
                 if (response.ok) {
+                    console.log("✅ Produção iniciada com sucesso!");
                     alert(`✅ ${result.message}\n\nIniciando monitoramento...`);
 
                     // Show timer card and stats again
@@ -370,20 +475,166 @@
                     // Restart fetching immediately
                     fetchDashboardData();
                 } else {
-                    alert(`❌ Erro: ${result.detail}`);
+                    console.error("❌ Erro na resposta:", result);
+                    alert(`❌ Erro: ${result.detail || result.message || 'Erro desconhecido'}`);
                 }
 
             } catch (error) {
-                console.error('Error starting production:', error);
-                alert('❌ Erro ao iniciar produção');
+                console.error('❌ Erro ao iniciar produção:', error);
+                alert('❌ Erro ao iniciar produção: ' + error.message);
             }
-        }
+        };
+
+        let currentPlanningId = null;
 
         // Init
         fetchDashboardData();
         intervalId = setInterval(fetchDashboardData, 1000); // Poll every second for timer precision
 
+        async function pauseProduction() {
+            console.log("⏸️ Botão pausar clicado");
+            console.log("Planning ID atual:", currentPlanningId);
+            
+            if (!currentPlanningId) {
+                console.error("❌ Planning ID não definido!");
+                alert("Erro: Nenhuma produção ativa para pausar");
+                return;
+            }
+            
+            try {
+                console.log("📤 Enviando requisição de pausa...");
+                const response = await fetch(`${API_URL}/production/pause`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planning_id: currentPlanningId })
+                });
+                
+                console.log("📥 Resposta:", response.status);
+                if (response.ok) {
+                    console.log("✅ Produção pausada!");
+                    fetchDashboardData(); // Refresh immediately
+                } else {
+                    const data = await response.json();
+                    console.error("❌ Erro:", data);
+                    alert("Erro ao pausar: " + (data.detail || "Erro desconhecido"));
+                }
+            } catch (e) { 
+                console.error("❌ Erro de conexão:", e);
+                alert("Erro ao pausar: " + e); 
+            }
+        }
 
+        async function resumeProduction() {
+            console.log("▶️ Botão retomar clicado");
+            console.log("Planning ID atual:", currentPlanningId);
+            
+            if (!currentPlanningId) {
+                console.error("❌ Planning ID não definido!");
+                alert("Erro: Nenhuma produção pausada para retomar");
+                return;
+            }
+            
+            try {
+                console.log("📤 Enviando requisição de retomada...");
+                const response = await fetch(`${API_URL}/production/resume`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planning_id: currentPlanningId })
+                });
+                
+                console.log("📥 Resposta:", response.status);
+                if (response.ok) {
+                    console.log("✅ Produção retomada!");
+                    fetchDashboardData();
+                } else {
+                    const data = await response.json();
+                    console.error("❌ Erro:", data);
+                    alert("Erro ao retomar: " + (data.detail || "Erro desconhecido"));
+                }
+            } catch (e) { 
+                console.error("❌ Erro de conexão:", e);
+                alert("Erro ao retomar: " + e); 
+            }
+        }
+
+        async function stopProduction() {
+            console.log("⏹️ Botão parar clicado");
+            console.log("Planning ID atual:", currentPlanningId);
+            
+            if (!currentPlanningId) {
+                console.error("❌ Planning ID não definido!");
+                alert("Erro: Nenhuma produção ativa para parar");
+                return;
+            }
+            
+            if (!confirm("⚠️ ATENÇÃO: Deseja realmente FINALIZAR a produção?\nEsta ação não pode ser desfeita.")) {
+                console.log("Operação cancelada pelo usuário");
+                return;
+            }
+
+            try {
+                console.log("📤 Enviando requisição de parada...");
+                const response = await fetch(`${API_URL}/production/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planning_id: currentPlanningId })
+                });
+                
+                console.log("📥 Resposta:", response.status);
+                if (response.ok) {
+                    console.log("✅ Produção finalizada!");
+                    // Force reload to show idle state
+                    location.reload();
+                } else {
+                    const data = await response.json();
+                    console.error("❌ Erro:", data);
+                    alert("Erro ao parar: " + (data.detail || "Erro desconhecido"));
+                }
+            } catch (e) { 
+                console.error("❌ Erro de conexão:", e);
+                alert("Erro ao parar: " + e); 
+            }
+        }
+
+        async function rebalanceProduction() {
+            console.log("🛠️ Botão rebalancear clicado");
+            console.log("Planning ID atual:", currentPlanningId);
+            
+            if (!currentPlanningId) {
+                console.error("❌ Planning ID não definido!");
+                alert("Erro: Nenhuma produção ativa para rebalancear");
+                return;
+            }
+            
+            if (!confirm("🛠️ REBALANCEAMENTO CRÍTICO\n\nDeseja parar a produção atual e ajustar o saldo restante?\nVocê será redirecionado para o Cockpit.")) {
+                console.log("Rebalanceamento cancelado pelo usuário");
+                return;
+            }
+
+            try {
+                console.log("📤 Enviando requisição de rebalanceamento...");
+                const response = await fetch(`${API_URL}/production/rebalance`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planning_id: currentPlanningId })
+                });
+
+                const data = await response.json();
+                console.log("📥 Resposta:", response.status, data);
+                
+                if (data.status === 'rebalancing_prepared') {
+                    console.log("✅ Rebalanceamento preparado, redirecionando...");
+                    // Redirect to Page 04 with parameters
+                    window.location.href = `../page_04/page_04.html?mode=rebalance&new_pso_id=${data.new_pso_id}&qty=${data.remaining_quantity}&original_planning=${data.original_planning_id}`;
+                } else {
+                    console.error("❌ Erro:", data);
+                    alert("Erro ao preparar rebalanceamento: " + (data.detail || "Erro desconhecido"));
+                }
+            } catch (e) { 
+                console.error("❌ Erro de comunicação:", e);
+                alert("Erro de comunicação: " + e); 
+            }
+        }
     </script>
 </body>
 

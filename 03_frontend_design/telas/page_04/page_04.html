@@ -937,6 +937,7 @@
         function updateCalculations() {
             state.activeSeamstresses.forEach((_, i) => {
                 const ws = document.getElementById(`ws-${i}`);
+                if (!ws) return; // Prevent crash if DOM not ready or ID mismatch
                 const cards = Array.from(ws.querySelectorAll('.op-card'));
                 const bank = document.getElementById('bank');
 
@@ -1182,6 +1183,123 @@
             } catch (error) {
                 console.error('Save Error:', error);
                 alert(`❌ Erro de conexão: ${error.message}`);
+            }
+        }
+
+        // --- Rebalancing & Initialization Logic ---
+
+        // IIFE to handle URL parameters for Rebalance Mode
+        (async function init() {
+            // Need to wait for DOM? This script is at body end, so OK.
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const mode = urlParams.get('mode');
+
+            if (mode === 'rebalance') {
+                const newPsoId = urlParams.get('new_pso_id');
+                const qty = urlParams.get('qty');
+                const originalPlanningId = urlParams.get('original_planning');
+
+                if (newPsoId && originalPlanningId) {
+                    await handleRebalanceMode(newPsoId, qty, originalPlanningId);
+                }
+            }
+        })();
+
+        async function handleRebalanceMode(newPsoId, qty, originalPlanningId) {
+            console.log("🛠️ Modo Rebalanceamento Ativo");
+
+            // 1. Load Data (Operations & Seamstresses)
+            await loadData(newPsoId);
+
+            // 2. Set Quantity
+            const qtyInput = document.getElementById('batch-total-quantity');
+            if (qtyInput) qtyInput.value = qty || 0;
+
+            // 3. Header Update
+            document.querySelector("header h1").innerText = `Cockpit: ${state.productReference} (Rebalanceamento)`;
+
+            // 4. Restore Allocations
+            await restoreAllocations(originalPlanningId);
+        }
+
+        async function restoreAllocations(planningId) {
+            try {
+                console.log(`Restoring allocations from planning ${planningId}...`);
+                const response = await fetch(`${API_URL}/planning/${planningId}/allocations`);
+                const result = await response.json();
+
+                // Wait for DOM to handle previous renders (workstations)
+                await new Promise(resolve => setTimeout(resolve, 300));
+
+                // Validate state before proceeding to avoid blank screen issues
+                if (!state.activeSeamstresses || state.activeSeamstresses.length === 0) {
+                    console.error("❌ No seamstresses found in state. Cannot restore allocations.");
+                    alert("Erro: Costureiras não carregadas corretamente. Tente recarregar a página.");
+                    return;
+                }
+
+                // Safe clear columns
+                state.activeSeamstresses.forEach((_, i) => {
+                    const col = document.getElementById(`ws-${i}`);
+                    if (col) col.innerHTML = '';
+                });
+
+                const allocations = result.allocations;
+
+                for (const alloc of allocations) {
+                    // Find column index
+                    // Backend returns "workstation_id" (verified via debug_allocations.py)
+                    const sIndex = state.activeSeamstresses.findIndex(s => s.id === alloc.workstation_id);
+
+                    if (sIndex === -1) {
+                        console.warn(`Workstation/Seamstress ID ${alloc.workstation_id} not found in current setup.`);
+                        continue;
+                    }
+
+                    const col = document.getElementById(`ws-${sIndex}`);
+                    if (!col) {
+                        console.error(`Column ws-${sIndex} not found in DOM!`);
+                        continue;
+                    }
+
+                    // Find OP
+                    // Backend now returns "operation_sequence" to allow matching across versions
+                    // We try to match by sequence first (robust), then fallback to ID (legacy/same version)
+                    let opObj = null;
+                    if (alloc.operation_sequence) {
+                        opObj = state.ops.find(o => o.seq === alloc.operation_sequence);
+                    }
+
+                    if (!opObj) {
+                        // Fallback to ID match
+                        opObj = state.ops.find(o => o.id === alloc.operation_id);
+                    }
+
+                    if (!opObj) {
+                        console.warn(`Operation Sequence ${alloc.operation_sequence} or ID ${alloc.operation_id} not found.`);
+                        continue;
+                    }
+
+                    // Create Card
+                    const cardHtml = generateCardHTML(opObj, alloc.is_fraction, alloc.quantity);
+
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = cardHtml;
+                    const cardEl = tempDiv.firstElementChild;
+
+                    col.appendChild(cardEl);
+                }
+
+                // Finalize
+                renderBank();
+                updateCalculations();
+
+                alert("⚠️ MODO REBALANCEAMENTO\n\n1. O layout anterior foi restaurado.\n2. O saldo restante foi calculado.\n3. Faça os ajustes e clique em PUBLICAR para aplicar.");
+
+            } catch (e) {
+                console.error("Error restoring allocations:", e);
+                alert("Erro ao restaurar layout do balanceamento anterior: " + e.message);
             }
         }
     </script>

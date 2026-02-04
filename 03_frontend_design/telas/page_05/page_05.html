@@ -67,15 +67,15 @@
         <div class="max-w-md mx-auto flex justify-between items-center">
             <div class="flex flex-col">
                 <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">OP Ativa</span>
-                <h1 class="text-xl font-black">#2024-001</h1>
+                <h1 id="header-op-code" class="text-xl font-black">--</h1>
             </div>
             <div class="text-right">
                 <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Referência</span>
-                <p class="font-bold">POLO PREMIUM</p>
+                <p id="header-product-ref" class="font-bold">--</p>
             </div>
             <div class="bg-[#4CAF50] text-black px-3 py-1 rounded-lg">
                 <p class="text-xs font-black uppercase">Lote</p>
-                <p class="text-lg font-black leading-none">10 pç</p>
+                <p id="header-batch-size" class="text-lg font-black leading-none">-- pç</p>
             </div>
         </div>
     </header>
@@ -127,19 +127,84 @@
         let clickState = 0;
         let armedTimeout;
         let timerInterval;
+        let lastBatchSize = null;  // Track batch size for rebalancing detection
 
-        // Fetch Queue
+        // Update Header Information with Dynamic Data
+        function updateHeaderInfo(data) {
+            console.log("📡 Dados recebidos do API:", data);
+
+            // Update OP Code - usar o product_reference como OP code
+            const opCodeElement = document.getElementById('header-op-code');
+            if (opCodeElement) {
+                opCodeElement.innerText = (data && data.po_reference) ? data.po_reference : "--";
+            }
+
+            // Update Product Reference/Description - usar o product_description
+            const productRefElement = document.getElementById('header-product-ref');
+            if (productRefElement) {
+                productRefElement.innerText = (data && data.product_description) ? data.product_description : "--";
+            }
+
+            // Update Batch Size (TL) - this is from the ACTIVE planning
+            const batchSizeElement = document.getElementById('header-batch-size');
+            if (batchSizeElement) {
+                const batchSize = (data && data.batch_size) ? data.batch_size : null;
+                
+                if (batchSize !== null) {
+                    batchSizeElement.innerText = `${batchSize} pç`;
+                    
+                    // Detect rebalancing: if batch size changed, highlight the change
+                    if (lastBatchSize !== null && lastBatchSize !== batchSize) {
+                        console.log(`🔄 Rebalanceamento detectado! Lote anterior: ${lastBatchSize}, Novo: ${batchSize}`);
+                        // Add visual feedback for rebalancing
+                        batchSizeElement.parentElement.classList.add('animate-pulse');
+                        setTimeout(() => {
+                            batchSizeElement.parentElement.classList.remove('animate-pulse');
+                        }, 2000);
+                    }
+                    
+                    lastBatchSize = batchSize;
+                } else {
+                    batchSizeElement.innerText = "-- pç";
+                }
+            }
+        }
+
+        // Fetch Queue and Update Header
         async function loadQueue() {
             try {
+                console.log("🔄 Buscando dados do API...");
                 const response = await fetch(`${API_URL}/batches/pending`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
                 const data = await response.json();
+                console.log("✅ Resposta do API:", data);
 
-                if (data.batches) {
+                // Check if we have valid data
+                if (data && data.batches !== undefined) {
                     pendingBatches = data.batches;
+                    // Update Header with dynamic data from backend
+                    updateHeaderInfo(data);
+                    updateUI();
+                } else {
+                    // No valid data structure
+                    console.warn("⚠️ Estrutura de dados inválida do API");
+                    updateHeaderInfo(null);
                     updateUI();
                 }
             } catch (error) {
-                console.error("Error loading queue:", error);
+                console.error("❌ Erro ao carregar fila:", error);
+                // Show friendly error state
+                updateHeaderInfo(null);
+                document.getElementById('waiting-list').innerHTML = `
+                    <div class="text-center p-6 bg-red-50 border-2 border-red-200 rounded-2xl">
+                        <p class="text-red-600 font-bold">Erro ao conectar com o servidor</p>
+                        <p class="text-sm text-red-500 mt-2">Tentando reconectar...</p>
+                    </div>
+                `;
             }
         }
 
@@ -147,11 +212,17 @@
             const currentSection = document.getElementById('current-batch-section');
             const mainCard = document.getElementById('main-card');
 
-            if (pendingBatches.length === 0) {
-                // Empty State
+            if (!pendingBatches || pendingBatches.length === 0) {
+                // Empty State - Sem OPs em produção
                 document.getElementById('current-cart-label').innerText = "---";
                 document.getElementById('current-timer').innerText = "--:--:--";
-                document.getElementById('waiting-list').innerHTML = '<p class="text-center text-gray-400 font-bold p-4">Não há lotes pendentes na fila.</p>';
+                document.getElementById('waiting-list').innerHTML = `
+                    <div class="text-center p-6 bg-gray-50 border-2 border-gray-200 rounded-2xl">
+                        <span class="material-symbols-outlined text-4xl text-gray-300">inbox</span>
+                        <p class="text-gray-500 font-bold mt-3">Não há lotes em produção</p>
+                        <p class="text-xs text-gray-400 mt-1">A célula está aguardando novos lotes</p>
+                    </div>
+                `;
 
                 // Disable button
                 const btn = document.getElementById('finish-btn');
@@ -209,7 +280,7 @@
         }
 
         async function executeFinish() {
-            if (pendingBatches.length === 0) return;
+            if (!pendingBatches || pendingBatches.length === 0) return;
 
             const currentBatch = pendingBatches[0];
             const card = document.getElementById('main-card');
@@ -247,6 +318,15 @@
             // Show next 3 items
             const nextBatches = pendingBatches.slice(1, 4);
 
+            if (nextBatches.length === 0) {
+                list.innerHTML = `
+                    <div class="text-center p-4 text-gray-400">
+                        <p class="text-sm font-bold">Apenas 1 lote na fila</p>
+                    </div>
+                `;
+                return;
+            }
+
             list.innerHTML = nextBatches.map(c => `
                 <div class="flex items-center justify-between p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl opacity-60">
                     <div class="flex flex-col">
@@ -267,7 +347,7 @@
 
         // Init
         loadQueue();
-        setInterval(loadQueue, 5000); // Poll every 5s logic
+        setInterval(loadQueue, 5000); // Poll every 5s to detect changes (including rebalancing)
 
     </script>
 </body>

@@ -19,13 +19,13 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SGP Costura API - Sprint 7.0")
 
-# Enable CORS for Frontend Development
+# Enable CORS for Frontend Development - MUST be before routes
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Shift Configuration
@@ -43,28 +43,83 @@ def calculate_working_minutes(start_dt: datetime, end_dt: datetime) -> float:
     """
     total_minutes = (end_dt - start_dt).total_seconds() / 60
     
-    # Check if lunch period falls within the work period
-    lunch_start = time(12, 0)  # 12:00
-    lunch_end = time(13, 0)    # 13:00
+    # --- Smart Shift Logic ---
+    # Define Breaks: (Start Time, End Time)
+    breaks = [
+        (time(12, 0), time(13, 0)),   # Almoço
+        (time(16, 0), time(16, 15)),  # Café da Tarde (Exemplo)
+    ]
     
-    # If the work period crosses lunch time, subtract 60 minutes
-    if start_dt.time() < lunch_end and end_dt.time() > lunch_start:
-        # Check if lunch period is fully contained
-        if start_dt.time() <= lunch_start and end_dt.time() >= lunch_end:
-            total_minutes -= 60  # Full lunch break
-        else:
-            # Partial lunch overlap (calculate intersection)
-            lunch_overlap_start = max(start_dt.time(), lunch_start)
-            lunch_overlap_end = min(end_dt.time(), lunch_end)
+    for b_start, b_end in breaks:
+        # Check if work interval overlaps with this break
+        if start_dt.time() < b_end and end_dt.time() > b_start:
+            
+            # CRITICAL FIX for "Production During Break":
+            # Only deduct the break if the work STARTED BEFORE the break began.
+            # If the user explicitly starts work AT 12:05 (inside break), 
+            # we assume they want to count that time (Override).
+            if start_dt.time() >= b_start:
+                continue 
+
+            # Calculate intersection
+            overlap_start = max(start_dt.time(), b_start)
+            overlap_end = min(end_dt.time(), b_end)
             
             overlap_minutes = (
-                datetime.combine(start_dt.date(), lunch_overlap_end) -
-                datetime.combine(start_dt.date(), lunch_overlap_start)
+                datetime.combine(start_dt.date(), overlap_end) -
+                datetime.combine(start_dt.date(), overlap_start)
             ).total_seconds() / 60
             
+            # Ensure we don't deduct more than the duration of the break itself (60 min/15 min)
+            # (Though the overlap calc handles this naturally)
             total_minutes -= overlap_minutes
     
-    return max(total_minutes, 0)  # Never return negative
+    return max(total_minutes, 0)
+
+def calculate_working_minutes_with_pauses(
+    db: Session, 
+    planning_id: int, 
+    start_dt: datetime, 
+    end_dt: datetime
+) -> float:
+    """
+    Calcula os minutos trabalhados descontando almoço E pausas registradas.
+    """
+    # 1. Cálculo Bruto (incluindo lógica de almoço existente)
+    total_minutes = calculate_working_minutes(start_dt, end_dt) # Chama a função original
+    
+    # 2. Buscar eventos de pausa/retorno para este planejamento
+    events = db.query(models.ProductionEvent).filter(
+        models.ProductionEvent.planning_id == planning_id
+    ).order_by(models.ProductionEvent.created_at).all()
+    
+    pause_minutes = 0.0
+    pause_start = None
+    
+    # Filter only relevant events (optimization)
+    relevant_events = [e for e in events if e.created_at >= start_dt and e.created_at <= end_dt]
+    
+    # But wait, a pause started BEFORE start_dt might still be active?
+    # For now, let's assume we care about pauses happening IN the window.
+    # Actually if paused before start_dt and resumed after, the window is fully paused?
+    # Let's stick to the user's logic: "Buscar eventos ... entre início e fim".
+    
+    for event in relevant_events:
+        if event.event_type == 'pause':
+            if not pause_start: # Only capture first pause if multiple (shouldn't happen if logic is correct)
+                pause_start = event.created_at
+        elif event.event_type == 'resume' and pause_start:
+            # Calcula duração da pausa e soma
+            duration = (event.created_at - pause_start).total_seconds() / 60
+            pause_minutes += duration
+            pause_start = None
+            
+    # Se ainda estiver pausado no momento do end_dt
+    if pause_start and pause_start < end_dt:
+        duration = (end_dt - pause_start).total_seconds() / 60
+        pause_minutes += duration
+
+    return max(total_minutes - pause_minutes, 0)
 
 # Seed Seamstresses if empty
 def seed_seamstresses(db: Session):
@@ -503,6 +558,46 @@ def get_planning_versions(pso_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+@app.get("/api/planning/{planning_id}/allocations")
+def get_planning_allocations(planning_id: int, db: Session = Depends(get_db)):
+    """
+    Returns the allocations for a specific planning ID.
+    Used to restore the Cockpit state during Rebalancing.
+    """
+    planning = db.query(models.ProductionPlanning).filter(
+        models.ProductionPlanning.id == planning_id
+    ).first()
+    
+    if not planning:
+        raise HTTPException(status_code=404, detail="Planning not found")
+        
+    result = []
+    
+    # Sort workstations by their original id or position if available
+    sorted_allocations = sorted(planning.allocations, key=lambda x: x.id)
+    
+    for seat in sorted_allocations:
+        # Sort operations by ID to respect original insertion order (UI order)
+        ops = sorted(seat.op_allocations, key=lambda x: x.id)
+        
+        for i, op_alloc in enumerate(ops):
+            # Fetch operation details to get sequence
+            operation = db.query(models.Operation).filter(models.Operation.id == op_alloc.operation_id).first()
+            op_sequence = operation.sequence if operation else 0
+
+            result.append({
+                "operation_id": op_alloc.operation_id,
+                "operation_sequence": op_sequence,
+                "workstation_id": seat.seamstress_id, # Seamstress ID
+                "quantity": op_alloc.executed_quantity,
+                "is_fraction": op_alloc.is_fractioned,
+                "position": i + 1
+            })
+            
+    return {"allocations": result, "pso_id": planning.pso_id}
+
+
 @app.get("/api/planning/published")
 def get_published_plannings(db: Session = Depends(get_db)):
     """
@@ -516,66 +611,79 @@ def get_published_plannings(db: Session = Depends(get_db)):
             models.ProductionOrder.id == models.ProductionPlanning.production_order_id
         ).distinct().all()
         
+        print(f"📊 Found {len(orders_with_planning)} production orders with plannings")
+        
         ops = []
         for po in orders_with_planning:
-            # Get all plannings for this PO
-            plannings = db.query(models.ProductionPlanning).filter(
-                models.ProductionPlanning.production_order_id == po.id
-            ).order_by(desc(models.ProductionPlanning.created_at)).all()
-            
-            if not plannings:
-                continue
-            
-            # Group plannings by PSO to show under each PSO version
-            # For the OP card, use the PSO from the first/most recent planning
-            first_planning = plannings[0]
-            main_pso = None
-            
-            if first_planning.pso_id:
-                main_pso = db.query(models.PSO).filter(models.PSO.id == first_planning.pso_id).first()
-            
-            # Fallback: if no pso_id, get latest PSO for product
-            if not main_pso:
-                main_pso = db.query(models.PSO).join(models.Product).filter(
-                    models.Product.reference == po.product_reference
-                ).order_by(desc(models.PSO.id)).first()
-            
-            if not main_pso:
-                continue
-            
-            versions = []
-            for idx, planning in enumerate(reversed(plannings)):
-                seamstress_count = db.query(models.WorkstationAllocation.seamstress_id).filter(
-                    models.WorkstationAllocation.planning_id == planning.id
-                ).distinct().count()
+            try:
+                # Get all plannings for this PO
+                plannings = db.query(models.ProductionPlanning).filter(
+                    models.ProductionPlanning.production_order_id == po.id
+                ).order_by(desc(models.ProductionPlanning.created_at)).all()
                 
-                # ✅ Get the PSO that was used in THIS specific planning
-                version_pso_id = planning.pso_id if planning.pso_id else main_pso.id
+                if not plannings:
+                    print(f"⚠️ No plannings found for PO {po.id}")
+                    continue
                 
-                versions.append({
-                    "planning_id": planning.id,
-                    "pso_id": version_pso_id,  # ✅ ADDED: Each version has its own pso_id
-                    "version_number": idx + 1,
-                    "version_name": planning.version_name,
-                    "notes": planning.notes,
-                    "created_at": planning.created_at.isoformat() if planning.created_at else None,
-                    "seamstress_count": seamstress_count,
-                    "batch_size": planning.batch_size,
-                    "pulse_duration": planning.pulse_duration
+                print(f"📋 PO {po.id} has {len(plannings)} plannings")
+                
+                # Group plannings by PSO to show under each PSO version
+                # For the OP card, use the PSO from the first/most recent planning
+                first_planning = plannings[0]
+                main_pso = None
+                
+                if first_planning.pso_id:
+                    main_pso = db.query(models.PSO).filter(models.PSO.id == first_planning.pso_id).first()
+                
+                # Fallback: if no pso_id, get latest PSO for product
+                if not main_pso:
+                    main_pso = db.query(models.PSO).join(models.Product).filter(
+                        models.Product.reference == po.product_reference
+                    ).order_by(desc(models.PSO.id)).first()
+                
+                if not main_pso:
+                    print(f"⚠️ No PSO found for PO {po.id}")
+                    continue
+                
+                versions = []
+                for idx, planning in enumerate(reversed(plannings)):
+                    seamstress_count = db.query(models.WorkstationAllocation.seamstress_id).filter(
+                        models.WorkstationAllocation.planning_id == planning.id
+                    ).distinct().count()
+                    
+                    # ✅ Get the PSO that was used in THIS specific planning
+                    version_pso_id = planning.pso_id if planning.pso_id else main_pso.id
+                    
+                    versions.append({
+                        "planning_id": planning.id,
+                        "pso_id": version_pso_id,  # ✅ ADDED: Each version has its own pso_id
+                        "version_number": idx + 1,
+                        "version_name": planning.version_name,
+                        "notes": planning.notes,
+                        "created_at": planning.created_at.isoformat() if planning.created_at else None,
+                        "seamstress_count": seamstress_count,
+                        "batch_size": planning.batch_size,
+                        "pulse_duration": planning.pulse_duration
+                    })
+                
+                ops.append({
+                    "pso_id": main_pso.id,  # Main PSO for the card header
+                    "product_reference": main_pso.product.reference,
+                    "product_description": main_pso.product.description,
+                    "version_count": len(versions),
+                    "versions": list(reversed(versions))  # Newest first
                 })
-            
-            ops.append({
-                "pso_id": main_pso.id,  # Main PSO for the card header
-                "product_reference": main_pso.product.reference,
-                "product_description": main_pso.product.description,
-                "version_count": len(versions),
-                "versions": list(reversed(versions))  # Newest first
-            })
+            except Exception as po_error:
+                print(f"❌ Error processing PO {po.id}: {po_error}")
+                continue
         
+        print(f"✅ Returning {len(ops)} OPs with plannings")
         return {"ops": ops}
         
     except Exception as e:
-        print(f"Error getting published plannings: {e}")
+        print(f"❌ Error getting published plannings: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -734,7 +842,14 @@ def start_production(data: dict, db: Session = Depends(get_db)):
         if not planning:
             raise HTTPException(status_code=404, detail="Planning not found")
         
+        # Activate
         planning.is_active = True
+
+        # Log Start Event
+        db.add(models.ProductionEvent(
+            planning_id=planning.id,
+            event_type="start"
+        ))
         db.commit()
         
         return {
@@ -749,6 +864,137 @@ def start_production(data: dict, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         print(f"Error starting production: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/production/pause")
+def pause_production(data: dict, db: Session = Depends(get_db)):
+    """Pause the current active production"""
+    try:
+        planning_id = data.get("planning_id")
+        planning = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.id == planning_id).first()
+        
+        if not planning or not planning.is_active:
+            raise HTTPException(status_code=400, detail="Planning not found or not active")
+            
+        db.add(models.ProductionEvent(planning_id=planning.id, event_type="pause"))
+        db.commit()
+        return {"status": "paused", "message": "Produção pausada"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/production/resume")
+def resume_production(data: dict, db: Session = Depends(get_db)):
+    """Resume the current active production"""
+    try:
+        planning_id = data.get("planning_id")
+        planning = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.id == planning_id).first()
+        
+        if not planning or not planning.is_active:
+            raise HTTPException(status_code=400, detail="Planning not found or not active")
+            
+        db.add(models.ProductionEvent(planning_id=planning.id, event_type="resume"))
+        db.commit()
+        return {"status": "resumed", "message": "Produção retomada"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/production/stop")
+def stop_production(data: dict, db: Session = Depends(get_db)):
+    """Stop/Finish the current active production"""
+    try:
+        planning_id = data.get("planning_id")
+        planning = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.id == planning_id).first()
+        
+        if not planning:
+            raise HTTPException(status_code=404, detail="Planning not found")
+            
+        # Log event and deactivate
+        db.add(models.ProductionEvent(planning_id=planning.id, event_type="stop"))
+        
+        # Deactivate
+        planning.is_active = False
+        db.commit()
+        
+        return {"status": "stopped", "message": "Produção finalizada"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/production/rebalance")
+def rebalance_production(data: dict, db: Session = Depends(get_db)):
+    """
+    Logic for Rebalancing (Trocar pneu com carro andando):
+    1. Calculate remaining qty
+    2. Clone PSO
+    3. Return info for Cockpit
+    """
+    try:
+        planning_id = data.get("planning_id")
+        planning = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.id == planning_id).first()
+        
+        if not planning:
+            raise HTTPException(status_code=404, detail="Planning not found")
+
+        # 1. Start Rebalancing Logic
+        po_id = planning.production_order_id
+        
+        # Calculate Completed Quantity
+        completed_batches = db.query(models.CartLote).filter(
+            models.CartLote.production_order_id == po_id,
+            models.CartLote.status == "Concluído"
+        ).all()
+        
+        completed_qty = sum(b.quantity_pieces for b in completed_batches if b.quantity_pieces)
+        total_original = planning.total_quantity or 0
+        remaining_qty = max(0, total_original - completed_qty)
+        
+        # 2. Clone PSO
+        original_pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
+        if not original_pso:
+             raise HTTPException(status_code=404, detail="Original PSO not found")
+             
+        new_version_name = f"{original_pso.version_name} (Rebal)"
+        new_pso = models.PSO(
+            product_id=original_pso.product_id,
+            version_name=new_version_name,
+            status="Em Criação", # Temporary
+            default_efficiency_factor=original_pso.default_efficiency_factor
+        )
+        db.add(new_pso)
+        db.flush()
+        
+        # Clone Operations (keeping original properties)
+        original_ops = db.query(models.Operation).filter(models.Operation.pso_id == original_pso.id).all()
+        for op in original_ops:
+            new_op = models.Operation(
+                pso_id=new_pso.id,
+                sequence=op.sequence,
+                description=op.description,
+                original_machine=op.original_machine,
+                macro_machine=op.macro_machine,
+                time_pdf=op.time_pdf,
+                time_edited=op.time_edited,
+                final_time=op.final_time,
+                is_active=op.is_active # Crucial: Keep same active/inactive state
+            )
+            db.add(new_op)
+            
+        db.commit()
+        
+        return {
+            "status": "rebalancing_prepared",
+            "new_pso_id": new_pso.id,
+            "original_planning_id": planning.id,
+            "remaining_quantity": remaining_qty,
+            "message": "Rebalanceamento preparado"
+        }
+
+    except Exception as e:
+        db.rollback()
+        print(f"Error rebalancing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -803,74 +1049,126 @@ def get_dashboard_active_status(db: Session = Depends(get_db)):
     Returns real-time status for the Factory Dashboard (Monitor).
     Includes: Active Planning, Last Checkout Time, Pulse Status, Seamstress Allocations
     """
-    # 1. Get Latest Active Planning
-    planning = db.query(models.ProductionPlanning).filter(
-        models.ProductionPlanning.is_active == True
-    ).order_by(desc(models.ProductionPlanning.id)).first()
+    try:
+        # 1. Get Latest Active Planning
+        planning = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.is_active == True
+        ).order_by(desc(models.ProductionPlanning.id)).first()
 
-    if not planning:
+        if not planning:
+            return {
+                "status": "idle", 
+                "message": "Nenhum planejamento ativo.",
+                "pulse_duration": 60,
+                "elapsed_seconds": 0,
+                "carts_produced": 0,
+                "workstations": []
+            }
+
+        po = db.query(models.ProductionOrder).filter(models.ProductionOrder.id == planning.production_order_id).first()
+        
+        if not po:
+            return {
+                "status": "idle", 
+                "message": "Ordem de Produção não encontrada.",
+                "pulse_duration": 60,
+                "elapsed_seconds": 0,
+                "carts_produced": 0,
+                "workstations": []
+            }
+        
+        # 2. Get Last Checkout (Pulse Reference)
+        last_tracking = db.query(models.BatchTracking).join(models.CartLote).filter(
+            models.CartLote.production_order_id == po.id
+        ).order_by(desc(models.BatchTracking.checkout_time)).first()
+
+        # Determine start time for the current cycle with Session Awareness
+        # Find the latest START event for this planning
+        latest_start_event = db.query(models.ProductionEvent).filter(
+            models.ProductionEvent.planning_id == planning.id, 
+            models.ProductionEvent.event_type == 'start'
+        ).order_by(desc(models.ProductionEvent.created_at)).first()
+
+        # Base reference is the start of this session (or planning creation as fallback)
+        session_start_time = latest_start_event.created_at if latest_start_event else planning.created_at
+
+        carts_produced = 0
+        start_time = session_start_time
+
+        if last_tracking:
+            carts_produced = db.query(models.BatchTracking).join(models.CartLote).filter(
+                 models.CartLote.production_order_id == po.id
+            ).count()
+            
+            # If the last batch was completed, the current cycle starts from that checkout time
+            if last_tracking.checkout_time > session_start_time:
+                start_time = last_tracking.checkout_time
+            else:
+                # If the last checkout was BEFORE this session (e.g. yesterday), 
+                # we start counting from the session start (08:00 today).
+                start_time = session_start_time
+
+        
+        # Calculate elapsed time with pauses (New Logic)
+        current_time = datetime.utcnow()
+        elapsed_minutes = calculate_working_minutes_with_pauses(
+            db, planning.id, start_time, current_time
+        )
+        elapsed_seconds = max(0, elapsed_minutes * 60)
+        
+        # Determine current status based on last event
+        latest_event = db.query(models.ProductionEvent).filter(
+            models.ProductionEvent.planning_id == planning.id
+        ).order_by(desc(models.ProductionEvent.created_at)).first()
+        
+        is_paused = latest_event and latest_event.event_type == 'pause'
+        
+        # 3. Get Active Seamstresses and Loads
+        allocations = []
+        for seat in planning.allocations:
+            active_ops_count = len(seat.op_allocations)
+            allocations.append({
+                "seamstress_name": seat.seamstress.name,
+                "position": seat.seamstress_id, # Simplify for now
+                "load_count": active_ops_count,
+                "status": "Produzindo" if active_ops_count > 0 else "Ociosa"
+            })
+
+        allocations.sort(key=lambda x: x["position"])
+
+        # Calculate total batches for this PO
+        total_batches = db.query(models.CartLote).filter(
+            models.CartLote.production_order_id == po.id
+        ).count()
+
+        # Determine status
+        final_status = "paused" if is_paused else "active"
+
         return {
-            "status": "idle", 
-            "message": "Nenhum planejamento ativo.",
+            "status": final_status,
+            "product": po.product_reference if po else "Desconhecido",
+            "planning_id": planning.id,
+            "pulse_duration": planning.pulse_duration,
+            "total_batches": total_batches,
+            "current_cycle_start": start_time,
+            "now_server": current_time,
+            "elapsed_seconds": elapsed_seconds,
+            "is_delayed": elapsed_seconds > (planning.pulse_duration * 60),
+            "carts_produced": carts_produced,
+            "workstations": allocations
+        }
+    except Exception as e:
+        print(f"Error in get_dashboard_active_status: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "message": f"Erro ao buscar status: {str(e)}",
             "pulse_duration": 60,
             "elapsed_seconds": 0,
             "carts_produced": 0,
             "workstations": []
         }
-
-    po = db.query(models.ProductionOrder).filter(models.ProductionOrder.id == planning.production_order_id).first()
-    
-    # 2. Get Last Checkout (Pulse Reference)
-    last_tracking = db.query(models.BatchTracking).join(models.CartLote).filter(
-        models.CartLote.production_order_id == po.id
-    ).order_by(desc(models.BatchTracking.checkout_time)).first()
-
-    # Determine start time for the current cycle
-    start_time = None
-    carts_produced = 0
-    
-    if last_tracking:
-        start_time = last_tracking.checkout_time
-        carts_produced = db.query(models.BatchTracking).join(models.CartLote).filter(
-             models.CartLote.production_order_id == po.id
-        ).count()
-    else:
-        start_time = planning.created_at
-
-    current_time = datetime.utcnow()
-    elapsed_seconds = (current_time - start_time).total_seconds() if start_time else 0
-    
-    # 3. Get Active Seamstresses and Loads
-    allocations = []
-    for seat in planning.allocations:
-        active_ops_count = len(seat.op_allocations)
-        allocations.append({
-            "seamstress_name": seat.seamstress.name,
-            "position": seat.seamstress_id, # Simplify for now
-            "load_count": active_ops_count,
-            "status": "Produzindo" if active_ops_count > 0 else "Ociosa"
-        })
-
-    allocations.sort(key=lambda x: x["position"])
-
-    # Calculate total batches for this PO
-    total_batches = db.query(models.CartLote).filter(
-        models.CartLote.production_order_id == po.id
-    ).count()
-
-    return {
-        "status": "active",
-        "product": po.product_reference if po else "Desconhecido",
-        "planning_id": planning.id,
-        "pulse_duration": planning.pulse_duration,
-        "total_batches": total_batches,  # ✅ Send dynamic batch count
-        "current_cycle_start": start_time,
-        "now_server": current_time,
-        "elapsed_seconds": elapsed_seconds,
-        "is_delayed": elapsed_seconds > (planning.pulse_duration * 60),
-        "carts_produced": carts_produced,
-        "workstations": allocations
-    }
 
 @app.post("/api/pso/import", status_code=status.HTTP_201_CREATED)
 async def import_pso(file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -1127,40 +1425,61 @@ def get_pending_batches(db: Session = Depends(get_db)):
     """
     Returns pending batches for the active Production Order.
     Used by the Checklist Screen (Page 05).
-    """
-    # 1. Find Active Planning/PO
-    planning = db.query(models.ProductionPlanning).filter(
-        models.ProductionPlanning.is_active == True
-    ).order_by(desc(models.ProductionPlanning.id)).first()
-
-    if not planning:
-         return {"batches": []}
-
-    po = db.query(models.ProductionOrder).filter(models.ProductionOrder.id == planning.production_order_id).first()
     
-    # 2. Get Pending Carts
-    carts = db.query(models.CartLote).filter(
-        models.CartLote.production_order_id == po.id,
-        models.CartLote.status != "Concluido"
-    ).order_by(models.CartLote.sequence_number).all()
+    Returns:
+    - po_reference: Product reference from ProductionOrder
+    - po_description: Product description (if available)
+    - op_code: OP code (from production_orders.code or formatted with ID)
+    - batch_size: Batch size from ACTIVE planning (handles rebalancing)
+    - batches: List of pending cart/batch objects
+    """
+    try:
+        # 1. Find Active Planning/PO
+        planning = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.is_active == True
+        ).order_by(desc(models.ProductionPlanning.id)).first()
 
-    # If no carts exist, create them? (For simulation purposes)
-    if not carts and po:
-        # Check if we should generate some?
-        # Sprint 4 assumption: we might need to "generate" carts if none exist.
-        pass
+        if not planning:
+             return {"batches": [], "po_reference": "N/A", "op_code": "N/A", "batch_size": 0}
 
-    return {
-        "po_reference": po.product_reference,
-        "batches": [
-            {
-                "id": c.id, 
-                "sequence": c.sequence_number, 
-                "status": c.status,
-                "quantity": c.quantity_pieces
-            } for c in carts
-        ]
-    }
+        po = db.query(models.ProductionOrder).filter(models.ProductionOrder.id == planning.production_order_id).first()
+        
+        if not po:
+            return {"batches": [], "po_reference": "N/A", "op_code": "N/A", "batch_size": 0}
+        
+        # Get the PSO to find product description
+        pso = None
+        product_description = "N/A"
+        if planning.pso_id:
+            pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
+            if pso and pso.product:
+                product_description = pso.product.description
+        
+        # 2. Get Pending Carts
+        carts = db.query(models.CartLote).filter(
+            models.CartLote.production_order_id == po.id,
+            models.CartLote.status != "Concluido"
+        ).order_by(models.CartLote.sequence_number).all()
+
+        return {
+            "po_reference": po.product_reference or "N/A",
+            "product_description": product_description,  # Description/name of the product
+            "op_code": f"OP-{po.id}" if po.id else "OP-N/A",  # Format OP code with ID
+            "batch_size": planning.batch_size or 0,  # Gets the batch size from the ACTIVE planning (handles rebalancing)
+            "batches": [
+                {
+                    "id": c.id, 
+                    "sequence": c.sequence_number, 
+                    "status": c.status,
+                    "quantity": c.quantity_pieces
+                } for c in carts
+            ]
+        }
+    except Exception as e:
+        print(f"Error in get_pending_batches: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"batches": [], "po_reference": "N/A", "op_code": "N/A", "batch_size": 0}
 
 @app.get("/api/analytics/dashboard")
 def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):

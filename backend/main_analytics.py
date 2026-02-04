@@ -122,7 +122,11 @@ def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):
         # Calculate actual elapsed time (first checkout to last checkout)
         checkout_times = sorted([b.checkout_time for b in completed_batches])
         if len(checkout_times) > 1:
-            elapsed_time = (checkout_times[-1] - checkout_times[0]).total_seconds() / 60  # minutes
+            # Use shared logic from main.py to handle pauses/shift breaks
+            from main import calculate_working_minutes_with_pauses
+            elapsed_time = calculate_working_minutes_with_pauses(
+                db, planning.id, checkout_times[0], checkout_times[-1]
+            )
             
             if elapsed_time > 0:
                 efficiency_current = (total_standard_minutes / elapsed_time) * 100

@@ -132,3 +132,15 @@ class User(Base):
     role = Column(String, default="operator")  # operator, supervisor, admin
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class ProductionEvent(Base):
+    """
+    Tabela: PRODUCTION_EVENTS (Start, Pause, Resume, Stop)
+    """
+    __tablename__ = "production_events"
+    id = Column(Integer, primary_key=True, index=True)
+    planning_id = Column(Integer, ForeignKey("production_planning.id"))
+    event_type = Column(String)  # 'start', 'pause', 'resume', 'stop'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    planning = relationship("ProductionPlanning")
