@@ -324,8 +324,13 @@
         });
 
         // Initial load and auto-refresh
-        fetchAnalytics();
-        setInterval(fetchAnalytics, 30000); // Refresh every 30 seconds
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                fetchAnalytics();
+                loadOPFilter();
+            }, 100);
+            setInterval(fetchAnalytics, 30000); // Manter refresh periódico
+        });
 
         // Load OPs dynamically from API with improved UX
         async function loadOPFilter() {
@@ -335,6 +340,10 @@
                 const products = data.products || [];
 
                 const select = document.getElementById('opFilter');
+                if (!select) {
+                    console.warn("⚠️ Elemento 'opFilter' não encontrado ainda.");
+                    return;
+                }
 
                 if (products.length === 0) {
                     // Mensagem se não houver nenhuma OP no banco
@@ -354,12 +363,13 @@
                 console.error("Erro ao carregar OPs:", error);
                 // Em caso de falha técnica de rede, mantém a mensagem neutra
                 const select = document.getElementById('opFilter');
-                select.innerHTML = `<option value="">Sem OPs p/ Selecionar</option>`;
+                if (select) {
+                    select.innerHTML = `<option value="">Erro ao carregar OPs</option>`;
+                }
             }
         }
 
-        // Initialize OP filter
-        loadOPFilter();
+
 
         // Handle OP filter change - update charts with selected OP data
         function onOPFilterChange() {
@@ -422,27 +432,58 @@
             }
 
             // Update pieces produced
-            if (data.production) {
+            if (data.production_volume || data.production) {
+                const vol = data.production_volume || data.production;
+                const produced = vol.total_pieces !== undefined ? vol.total_pieces : vol.current;
+                const target = vol.target_volume !== undefined ? vol.target_volume : vol.target;
+
                 const piecesValue = document.getElementById('pieces-value');
                 if (piecesValue) {
-                    piecesValue.innerHTML = `${data.production.current} <span class="text-gray-600 text-lg">/ ${data.production.target}</span>`;
+                    piecesValue.innerHTML = `${produced.toLocaleString('pt-BR')} <span class="text-gray-600 text-lg">/ ${target.toLocaleString('pt-BR')}</span>`;
                 }
 
                 const piecesProgress = document.getElementById('pieces-progress');
-                if (piecesProgress) {
-                    const percentage = ((data.production.current / data.production.target) * 100).toFixed(1);
+                if (piecesProgress && target > 0) {
+                    const percentage = ((produced / target) * 100).toFixed(1);
                     piecesProgress.textContent = `${percentage}% do total da Ordem`;
                 }
             }
 
+            // Update Carts/Batches produced
+            if (data.production_volume) {
+                const currentCarts = data.production_volume.total_batches || 0;
+                const totalCarts = data.production_volume.target_batches || 24;
+                const cartsValue = document.getElementById('carts-value');
+                if (cartsValue) {
+                    cartsValue.innerHTML = `${currentCarts} <span class="text-gray-600 text-2xl">/ ${totalCarts}</span>`;
+                }
+            } else if (data.produced_batches !== undefined) {
+                const currentCarts = data.produced_batches;
+                const totalCarts = data.target_batches || 24;
+                const cartsValue = document.getElementById('carts-value');
+                if (cartsValue) {
+                    cartsValue.innerHTML = `${currentCarts} <span class="text-gray-600 text-2xl">/ ${totalCarts}</span>`;
+                }
+            }
+
             // Update delay rate donut chart
-            if (cartStatusChart && data.delay_rate) { // Changed donutChart to cartStatusChart
-                const early = data.delay_rate.early || 0;
-                const onTime = data.delay_rate.on_time || 0;
-                const delayed = data.delay_rate.delayed || 0;
+            if (cartStatusChart && data.delay_rate) {
+                const early = data.delay_rate.early_count || data.delay_rate.early || 0;
+                const onTime = data.delay_rate.on_time_count || data.delay_rate.on_time || 0;
+                const delayed = data.delay_rate.delayed_count || data.delay_rate.delayed || 0;
+                const total = data.delay_rate.total_count || (early + onTime + delayed) || 1;
 
                 cartStatusChart.data.datasets[0].data = [early, onTime, delayed];
                 cartStatusChart.update();
+
+                // Update text stats
+                if (document.getElementById('early-count')) document.getElementById('early-count').innerText = early.toString().padStart(2, '0');
+                if (document.getElementById('ontime-count')) document.getElementById('ontime-count').innerText = onTime.toString().padStart(2, '0');
+                if (document.getElementById('delayed-count')) document.getElementById('delayed-count').innerText = delayed.toString().padStart(2, '0');
+
+                if (document.getElementById('early-percent')) document.getElementById('early-percent').innerText = `${((early / total) * 100).toFixed(1)}% do total`;
+                if (document.getElementById('ontime-percent')) document.getElementById('ontime-percent').innerText = `${((onTime / total) * 100).toFixed(1)}% do total`;
+                if (document.getElementById('delayed-percent')) document.getElementById('delayed-percent').innerText = `${((delayed / total) * 100).toFixed(1)}% do total`;
             }
         }
     </script>

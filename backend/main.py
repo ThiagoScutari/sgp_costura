@@ -467,14 +467,14 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
                 )
                 db.add(op_alloc)
 
-        # 5. Generate Batches (CartLote)
-        # Update PO quantity to match current planning
+        # 5. Generate Batches (CartLote) for THIS planning session
+        # Update PO quantity to match current planning metadata
         if data.total_quantity:
             po.quantity = data.total_quantity
             db.add(po)
             
-        # Clear existing batches for this PO to avoid duplicates/ghost batches
-        db.query(models.CartLote).filter(models.CartLote.production_order_id == po.id).delete()
+        # ✅ NO LONGER DELETING: We keep history. New batches are tied to new_planning.id
+        # db.query(models.CartLote).filter(models.CartLote.production_order_id == po.id).delete()
         db.flush()
 
         # Generate new batches based on total quantity and batch size
@@ -492,6 +492,7 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
             
             new_lote = models.CartLote(
                 production_order_id=po.id,
+                planning_id=new_planning.id,  # ✅ Link to this specific session
                 sequence_number=i + 1,
                 quantity_pieces=current_qty,
                 status="Aguardando"
@@ -1077,9 +1078,9 @@ def get_dashboard_active_status(db: Session = Depends(get_db)):
                 "workstations": []
             }
         
-        # 2. Get Last Checkout (Pulse Reference)
-        last_tracking = db.query(models.BatchTracking).join(models.CartLote).filter(
-            models.CartLote.production_order_id == po.id
+        # 2. Get Last Checkout for THIS SPECIFIC PLANNING (Pulse Reference)
+        last_tracking = db.query(models.BatchTracking).filter(
+            models.BatchTracking.planning_id == planning.id
         ).order_by(desc(models.BatchTracking.checkout_time)).first()
 
         # Determine start time for the current cycle with Session Awareness
@@ -1096,8 +1097,9 @@ def get_dashboard_active_status(db: Session = Depends(get_db)):
         start_time = session_start_time
 
         if last_tracking:
-            carts_produced = db.query(models.BatchTracking).join(models.CartLote).filter(
-                 models.CartLote.production_order_id == po.id
+            # ✅ CRITICAL: Only count batches from THIS planning session
+            carts_produced = db.query(models.BatchTracking).filter(
+                models.BatchTracking.planning_id == planning.id
             ).count()
             
             # If the last batch was completed, the current cycle starts from that checkout time
@@ -1136,10 +1138,36 @@ def get_dashboard_active_status(db: Session = Depends(get_db)):
 
         allocations.sort(key=lambda x: x["position"])
 
-        # Calculate total batches for this PO
+        # Calculate total batches for THIS session
         total_batches = db.query(models.CartLote).filter(
-            models.CartLote.production_order_id == po.id
+            models.CartLote.planning_id == planning.id
         ).count()
+        
+        # ✅ REAL-TIME EFFICIENCY CALCULATION
+        efficiency = 0.0
+        
+        if carts_produced > 0:
+            # Calculate Standard Minutes (TP × Completed Batches)
+            total_tp_per_batch = 0.0
+            for alloc in planning.allocations:
+                for op_alloc in alloc.op_allocations:
+                    operation = db.query(models.Operation).filter(
+                        models.Operation.id == op_alloc.operation_id
+                    ).first()
+                    if operation:
+                        total_tp_per_batch += operation.final_time
+            
+            standard_minutes = total_tp_per_batch * carts_produced
+            
+            # Calculate Actual Worked Minutes (Session Start to Now, minus pauses)
+            worked_minutes = calculate_working_minutes_with_pauses(
+                db, planning.id, session_start_time, current_time
+            )
+            
+            # Efficiency = (Standard Minutes / Worked Minutes) × 100
+            if worked_minutes > 0:
+                efficiency = (standard_minutes / worked_minutes) * 100
+                efficiency = round(efficiency, 1)
 
         # Determine status
         final_status = "paused" if is_paused else "active"
@@ -1155,6 +1183,7 @@ def get_dashboard_active_status(db: Session = Depends(get_db)):
             "elapsed_seconds": elapsed_seconds,
             "is_delayed": elapsed_seconds > (planning.pulse_duration * 60),
             "carts_produced": carts_produced,
+            "efficiency": efficiency,
             "workstations": allocations
         }
     except Exception as e:
@@ -1375,7 +1404,7 @@ def checkout_batch(item: CheckoutRequest, db: Session = Depends(get_db)):
     
     if previous_sequence > 0:
         prev_cart = db.query(models.CartLote).filter(
-            models.CartLote.production_order_id == cart.production_order_id,
+            models.CartLote.planning_id == cart.planning_id,
             models.CartLote.sequence_number == previous_sequence
         ).first()
         
@@ -1400,6 +1429,7 @@ def checkout_batch(item: CheckoutRequest, db: Session = Depends(get_db)):
 
     tracking_record = models.BatchTracking(
         batch_id=item.batch_id,
+        planning_id=cart.planning_id,  # ✅ Link directly to session through the cart
         workstation_id=item.workstation_id,
         checkout_time=current_time,
         is_delayed=is_delayed
@@ -1411,13 +1441,45 @@ def checkout_batch(item: CheckoutRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(tracking_record)
     
+    # ✅ AUTO-STOP LOGIC: Check if this was the last batch for THIS specific planning session
+    remaining_batches = db.query(models.CartLote).filter(
+        models.CartLote.planning_id == cart.planning_id,
+        models.CartLote.status != "Concluido"
+    ).count()
+    
+    is_last_batch = (remaining_batches == 0)
+    
+    if is_last_batch:
+        # Find the active planning for this production order
+        planning = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.production_order_id == cart.production_order_id,
+            models.ProductionPlanning.is_active == True
+        ).first()
+        
+        if planning:
+            # Deactivate the planning
+            planning.is_active = False
+            
+            # Register STOP event
+            stop_event = models.ProductionEvent(
+                planning_id=planning.id,
+                event_type='stop',
+                created_at=current_time
+            )
+            db.add(stop_event)
+            db.commit()
+            
+            print(f"✅ AUTO-STOP: Last batch completed for Planning {planning.id}. Production stopped automatically.")
+    
     return {
         "message": "Checkout registered successfully",
         "tracking_id": tracking_record.id,
         "batch_id": tracking_record.batch_id,
         "checkout_time": tracking_record.checkout_time,
         "is_delayed": tracking_record.is_delayed,
-        "elapsed_seconds": (current_time - start_time).total_seconds() if start_time else None
+        "elapsed_seconds": (current_time - start_time).total_seconds() if start_time else None,
+        "is_last_batch": is_last_batch,
+        "production_completed": is_last_batch
     }
 
 @app.get("/api/batches/pending")
@@ -1455,9 +1517,9 @@ def get_pending_batches(db: Session = Depends(get_db)):
             if pso and pso.product:
                 product_description = pso.product.description
         
-        # 2. Get Pending Carts
+        # 2. Get Pending Carts for THIS planning session
         carts = db.query(models.CartLote).filter(
-            models.CartLote.production_order_id == po.id,
+            models.CartLote.planning_id == planning.id,
             models.CartLote.status != "Concluido"
         ).order_by(models.CartLote.sequence_number).all()
 
@@ -1517,9 +1579,18 @@ def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):
     
     avg_pieces_per_hour = total_pieces / hours if hours > 0 else 0
     
-    # Get target volume from active Production Order
+    # Get the active planning to find operation times and specific targets
+    planning = db.query(models.ProductionPlanning).filter(
+        models.ProductionPlanning.is_active == True
+    ).order_by(desc(models.ProductionPlanning.id)).first()
+
+    # Get target volume from active planning session
     target_volume = 0
+    target_batches = 0
     if planning:
+        target_batches = db.query(models.CartLote).filter(
+            models.CartLote.planning_id == planning.id
+        ).count()
         # Get the production order associated with this planning
         po = db.query(models.ProductionOrder).filter(
             models.ProductionOrder.id == planning.production_order_id
@@ -1527,11 +1598,7 @@ def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):
         if po:
             target_volume = po.quantity or 0
     
-    # Calculate efficiency (Standard Time vs Actual Time)
-    # Get the active planning to find operation times
-    planning = db.query(models.ProductionPlanning).filter(
-        models.ProductionPlanning.is_active == True
-    ).order_by(desc(models.ProductionPlanning.id)).first()
+    # Efficiency calculated below using the planning session found above
     
     efficiency_current = 0
     if planning and len(completed_batches) > 1:
@@ -1601,6 +1668,8 @@ def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):
             "status": efficiency_status
         },
         "delay_rate": {
+            "early_count": 0, # Future: check checkouts < 80% pulse
+            "on_time_count": total_batches - delayed_count,
             "delayed_count": delayed_count,
             "total_count": total_batches,
             "percentage": round(delay_percentage, 1)
@@ -1609,10 +1678,132 @@ def get_analytics_dashboard(hours: int = 8, db: Session = Depends(get_db)):
             "total_pieces": total_pieces,
             "total_batches": total_batches,
             "avg_pieces_per_hour": round(avg_pieces_per_hour, 1),
-            "target_volume": target_volume
+            "target_volume": target_volume,
+            "target_batches": target_batches
         },
         "hourly_breakdown": hourly_breakdown
     }
+
+@app.get("/api/analytics/pso/{pso_id}")
+def get_pso_analytics(pso_id: int, db: Session = Depends(get_db)):
+    """
+    Returns analytics for a specific PSO (Product Sequence Order).
+    Used by Page 07 (BI Dashboard) to show production history and metrics.
+    """
+    try:
+        pso = db.query(models.PSO).filter(models.PSO.id == pso_id).first()
+        if not pso:
+            raise HTTPException(status_code=404, detail="PSO not found")
+        
+        plannings = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.pso_id == pso_id
+        ).all()
+        
+        if not plannings:
+            return {
+                "pso_id": pso_id,
+                "product_reference": pso.product.reference if pso.product else "N/A",
+                "product_description": pso.product.description if pso.product else "N/A",
+                "target_volume": 0,
+                "target_batches": 0,
+                "produced_volume": 0,
+                "produced_batches": 0,
+                "efficiency": 0.0,
+                "hourly_production": []
+            }
+        
+        latest_planning = max(plannings, key=lambda p: p.created_at)
+        
+        po = db.query(models.ProductionOrder).filter(
+            models.ProductionOrder.id == latest_planning.production_order_id
+        ).first()
+        
+        target_volume = po.quantity if po and po.quantity else 0
+        target_batches = db.query(models.CartLote).filter(
+            models.CartLote.production_order_id == po.id
+        ).count() if po else 0
+        
+        completed_trackings = []
+        if po:
+            completed_trackings = db.query(models.BatchTracking).filter(
+                models.BatchTracking.planning_id == latest_planning.id
+            ).order_by(models.BatchTracking.checkout_time).all()
+        
+        produced_batches = len(completed_trackings)
+        
+        produced_volume = 0
+        if completed_trackings:
+            batch_ids = [t.batch_id for t in completed_trackings]
+            carts = db.query(models.CartLote).filter(
+                models.CartLote.id.in_(batch_ids)
+            ).all()
+            produced_volume = sum(c.quantity_pieces or 0 for c in carts)
+        
+        efficiency = 0.0
+        if produced_batches > 0 and latest_planning:
+            total_tp_per_batch = 0.0
+            for alloc in latest_planning.allocations:
+                for op_alloc in alloc.op_allocations:
+                    operation = db.query(models.Operation).filter(
+                        models.Operation.id == op_alloc.operation_id
+                    ).first()
+                    if operation:
+                        total_tp_per_batch += operation.final_time
+            
+            standard_minutes = total_tp_per_batch * produced_batches
+            
+            if completed_trackings:
+                start_event = db.query(models.ProductionEvent).filter(
+                    models.ProductionEvent.planning_id == latest_planning.id,
+                    models.ProductionEvent.event_type == 'start'
+                ).order_by(models.ProductionEvent.created_at).first()
+                
+                session_start = start_event.created_at if start_event else latest_planning.created_at
+                last_checkout = completed_trackings[-1].checkout_time
+                
+                worked_minutes = (last_checkout - session_start).total_seconds() / 60
+                
+                if worked_minutes > 0:
+                    efficiency = (standard_minutes / worked_minutes) * 100
+                    efficiency = round(efficiency, 1)
+        
+        hourly_data = {}
+        for tracking in completed_trackings:
+            hour_key = tracking.checkout_time.strftime("%H:00")
+            if hour_key not in hourly_data:
+                hourly_data[hour_key] = {"pieces": 0, "batches": 0}
+            
+            cart = db.query(models.CartLote).filter(
+                models.CartLote.id == tracking.batch_id
+            ).first()
+            if cart:
+                hourly_data[hour_key]["pieces"] += cart.quantity_pieces or 0
+                hourly_data[hour_key]["batches"] += 1
+        
+        hourly_production = [
+            {"hour": hour, "pieces": data["pieces"], "batches": data["batches"]}
+            for hour, data in sorted(hourly_data.items())
+        ]
+        
+        return {
+            "pso_id": pso_id,
+            "product_reference": pso.product.reference if pso.product else "N/A",
+            "product_description": pso.product.description if pso.product else "N/A",
+            "target_volume": target_volume,
+            "target_batches": target_batches,
+            "produced_volume": produced_volume,
+            "produced_batches": produced_batches,
+            "efficiency": efficiency,
+            "hourly_production": hourly_production
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_pso_analytics: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 def health_check():

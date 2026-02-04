@@ -108,19 +108,23 @@ class CartLote(Base):
     __tablename__ = "cart_lote"
     id = Column(Integer, primary_key=True, index=True)
     production_order_id = Column(Integer, ForeignKey("production_orders.id"))
+    planning_id = Column(Integer, ForeignKey("production_planning.id"), nullable=True)  # ✅ NEW: Session isolation
     sequence_number = Column(Integer)
     status = Column(String, default="Aguardando")
     quantity_pieces = Column(Integer)
     production_order = relationship("ProductionOrder")
+    planning = relationship("ProductionPlanning")  # ✅ NEW: Link to specific session
 
 class BatchTracking(Base):
     __tablename__ = "batch_tracking"
     id = Column(Integer, primary_key=True, index=True)
     batch_id = Column(Integer, ForeignKey("cart_lote.id")) 
+    planning_id = Column(Integer, ForeignKey("production_planning.id"), nullable=True)  # ✅ NEW: Session isolation
     workstation_id = Column(Integer, nullable=True)
     checkout_time = Column(DateTime, default=datetime.utcnow)
     is_delayed = Column(Boolean, default=False)
     batch = relationship("CartLote")
+    planning = relationship("ProductionPlanning")  # ✅ NEW: Link to planning session
 
 class User(Base):
     """User model for authentication"""

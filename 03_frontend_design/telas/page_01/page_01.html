@@ -173,7 +173,7 @@
                 updateDashboard(data);
             } catch (error) {
                 console.error("❌ Dashboard Sync Error:", error);
-                showIdleState({status: 'idle'});
+                showIdleState({ status: 'idle' });
                 currentPlanningId = null;  // Clear planning ID on error
             }
         }
@@ -227,6 +227,11 @@
             console.log("🔄 Atualizando dashboard com planning_id:", data.planning_id);
             currentPlanningId = data.planning_id;
             console.log("✅ currentPlanningId definido para:", currentPlanningId);
+
+            // Restore visibility
+            document.getElementById('timer-card').style.display = 'block';
+            const grid = document.querySelector('.grid');
+            if (grid) grid.style.display = 'grid';
 
             // Toggle Buttons based on Status
             const btnPause = document.getElementById('btn-pause');
@@ -366,11 +371,11 @@
             try {
                 console.log("📡 Carregando planejamentos publicados...");
                 const response = await fetch(`${API_URL}/planning/published`);
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
-                
+
                 const data = await response.json();
                 console.log("✅ Planejamentos carregados:", data);
 
@@ -453,7 +458,7 @@
             // -------------------------------
 
             try {
-                console.log("📤 Enviando requisição para iniciar produção...", {planning_id: parseInt(planningId)});
+                console.log("📤 Enviando requisição para iniciar produção...", { planning_id: parseInt(planningId) });
                 const response = await fetch(`${API_URL}/production/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -494,13 +499,13 @@
         async function pauseProduction() {
             console.log("⏸️ Botão pausar clicado");
             console.log("Planning ID atual:", currentPlanningId);
-            
+
             if (!currentPlanningId) {
                 console.error("❌ Planning ID não definido!");
                 alert("Erro: Nenhuma produção ativa para pausar");
                 return;
             }
-            
+
             try {
                 console.log("📤 Enviando requisição de pausa...");
                 const response = await fetch(`${API_URL}/production/pause`, {
@@ -508,7 +513,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ planning_id: currentPlanningId })
                 });
-                
+
                 console.log("📥 Resposta:", response.status);
                 if (response.ok) {
                     console.log("✅ Produção pausada!");
@@ -518,22 +523,22 @@
                     console.error("❌ Erro:", data);
                     alert("Erro ao pausar: " + (data.detail || "Erro desconhecido"));
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error("❌ Erro de conexão:", e);
-                alert("Erro ao pausar: " + e); 
+                alert("Erro ao pausar: " + e);
             }
         }
 
         async function resumeProduction() {
             console.log("▶️ Botão retomar clicado");
             console.log("Planning ID atual:", currentPlanningId);
-            
+
             if (!currentPlanningId) {
                 console.error("❌ Planning ID não definido!");
                 alert("Erro: Nenhuma produção pausada para retomar");
                 return;
             }
-            
+
             try {
                 console.log("📤 Enviando requisição de retomada...");
                 const response = await fetch(`${API_URL}/production/resume`, {
@@ -541,7 +546,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ planning_id: currentPlanningId })
                 });
-                
+
                 console.log("📥 Resposta:", response.status);
                 if (response.ok) {
                     console.log("✅ Produção retomada!");
@@ -551,22 +556,22 @@
                     console.error("❌ Erro:", data);
                     alert("Erro ao retomar: " + (data.detail || "Erro desconhecido"));
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error("❌ Erro de conexão:", e);
-                alert("Erro ao retomar: " + e); 
+                alert("Erro ao retomar: " + e);
             }
         }
 
         async function stopProduction() {
             console.log("⏹️ Botão parar clicado");
             console.log("Planning ID atual:", currentPlanningId);
-            
+
             if (!currentPlanningId) {
                 console.error("❌ Planning ID não definido!");
                 alert("Erro: Nenhuma produção ativa para parar");
                 return;
             }
-            
+
             if (!confirm("⚠️ ATENÇÃO: Deseja realmente FINALIZAR a produção?\nEsta ação não pode ser desfeita.")) {
                 console.log("Operação cancelada pelo usuário");
                 return;
@@ -579,7 +584,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ planning_id: currentPlanningId })
                 });
-                
+
                 console.log("📥 Resposta:", response.status);
                 if (response.ok) {
                     console.log("✅ Produção finalizada!");
@@ -590,22 +595,22 @@
                     console.error("❌ Erro:", data);
                     alert("Erro ao parar: " + (data.detail || "Erro desconhecido"));
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error("❌ Erro de conexão:", e);
-                alert("Erro ao parar: " + e); 
+                alert("Erro ao parar: " + e);
             }
         }
 
         async function rebalanceProduction() {
             console.log("🛠️ Botão rebalancear clicado");
             console.log("Planning ID atual:", currentPlanningId);
-            
+
             if (!currentPlanningId) {
                 console.error("❌ Planning ID não definido!");
                 alert("Erro: Nenhuma produção ativa para rebalancear");
                 return;
             }
-            
+
             if (!confirm("🛠️ REBALANCEAMENTO CRÍTICO\n\nDeseja parar a produção atual e ajustar o saldo restante?\nVocê será redirecionado para o Cockpit.")) {
                 console.log("Rebalanceamento cancelado pelo usuário");
                 return;
@@ -621,7 +626,7 @@
 
                 const data = await response.json();
                 console.log("📥 Resposta:", response.status, data);
-                
+
                 if (data.status === 'rebalancing_prepared') {
                     console.log("✅ Rebalanceamento preparado, redirecionando...");
                     // Redirect to Page 04 with parameters
@@ -630,9 +635,9 @@
                     console.error("❌ Erro:", data);
                     alert("Erro ao preparar rebalanceamento: " + (data.detail || "Erro desconhecido"));
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error("❌ Erro de comunicação:", e);
-                alert("Erro de comunicação: " + e); 
+                alert("Erro de comunicação: " + e);
             }
         }
     </script>
