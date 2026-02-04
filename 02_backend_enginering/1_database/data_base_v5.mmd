@@ -1,0 +1,159 @@
+---
+config:
+  layout: elk
+---
+erDiagram
+    PRODUCT ||--o{ PSO : "possui"
+    PSO ||--o{ OPERATION_ITEM : "contem"
+    PRODUCT ||--o{ PRODUCTION_ORDER : "gera"
+    PSO ||--o{ PRODUCTION_ORDER : "define_base"
+    
+    PRODUCTION_ORDER ||--o{ PRODUCTION_PLANNING : "possui_versoes_de"
+    PRODUCTION_PLANNING ||--o{ WORKSTATION_ALLOCATION : "configura"
+    
+    SEAMSTRESS ||--o{ MULTIPURPOSE_MATRIX : "possui"
+    SEAMSTRESS ||--o{ WORKSTATION_ALLOCATION : "ocupa"
+    
+    WORKSTATION_ALLOCATION ||--o{ OPERATION_ALLOCATION : "possui"
+    OPERATION_ITEM ||--o{ OPERATION_ALLOCATION : "contem"
+    OPERATION_ITEM ||--o{ OPERATION_ITEM : "depende_de"
+    
+    %% Relacionamento com Resources
+    RESOURCES ||--o{ OPERATION_ITEM : "atende"
+
+    PRODUCTION_ORDER ||--o{ CART_LOTE : "gera"
+    CART_LOTE ||--o{ BATCH_TRACKING : "registra_evento"
+    
+    TURN_CALENDAR ||--o{ MAINTENANCE_SCHEDULE : "sofre_ajustes"
+    SEAMSTRESS ||--o{ MAINTENANCE_SCHEDULE : "pode_ter"
+
+    PRODUCT {
+        int id PK
+        string referencia "SKU"
+        string descricao
+    }
+
+    PSO {
+        int id PK
+        int product_id FK
+        string version_name
+        string status "Ativa/Obsoleta"
+        float default_efficiency_factor
+        datetime created_at
+    }
+
+    RESOURCES {
+        int id PK
+        string category "RETA, OVERLOCK, COBERTURA, MANUAL, etc"
+        string internal_code "Patrimônio ou ID Interno"
+        string status "Disponível/Manutenção"
+    }
+
+    OPERATION_ITEM {
+        int id PK
+        int pso_id FK
+        int resource_id FK "FK para Resources"
+        int sequence "Ordem no PDF"
+        string description
+        string original_machine "Texto bruto do PDF"
+        float time_pdf "Tempo original do PDF"
+        float time_edited "Tempo ajustado pelo Owner"
+        float efficiency_factor "Fator de eficiência da operação"
+        float final_time "Calculado: time_edited / efficiency"
+        string type "Preparatória / Independente / Dependente"
+        int dependency_id FK "ID da antecessora"
+    }
+
+    PRODUCTION_ORDER {
+        int id PK
+        int product_id FK
+        int pso_id FK
+        int current_planning_id FK
+        int quantity "Qtd total da OP"
+        int batch_size_tl "TL: Peças por carrinho (Calculado)"
+        string status "Pendente/Ativa/Pausada/Fim"
+        datetime release_date
+        datetime expected_delivery
+    }
+
+    PRODUCTION_PLANNING {
+        int id PK
+        int production_order_id FK
+        string version_name
+        int pulse_duration "30 ou 60 minutos"
+        int total_operators
+        float efficiency_factor "Eficiência esperada da célula"
+        boolean is_active
+    }
+
+    WORKSTATION_ALLOCATION {
+        int id PK
+        int planning_id FK
+        int seamstress_id FK
+        int position_sequence "Posição na pista"
+        float load_time_batch_min "Carga total calculada (CI)"
+    }
+
+    OPERATION_ALLOCATION {
+        int id PK
+        int allocation_id FK
+        int operation_item_id FK
+        int executed_quantity "Qtd de peças (TL ou Fração)"
+        boolean is_fractioned "Sinalizador de divisão"
+    }
+
+    CART_LOTE {
+        int id PK
+        int production_order_id FK
+        int sequence_number "ID do Carrinho (1, 2, 3...)"
+        int quantity_pieces "Quantidade no carrinho (TL)"
+        string status "Aguardando / Em Produção / Finalizado"
+        datetime created_at
+    }
+
+    BATCH_TRACKING {
+        int id PK
+        int cart_id FK
+        datetime check_out "Timestamp do Check Digital"
+        boolean is_delayed "Calculado vs PulseDuration"
+        int workstation_id FK "Onde o check ocorreu"
+    }
+
+    SEAMSTRESS {
+        int id PK
+        string full_name
+        string status "Ativa/Inativa"
+    }
+
+    MULTIPURPOSE_MATRIX {
+        int id PK
+        int seamstress_id FK
+        string macro_machine "Categoria da Resource"
+        int skill_level "Nível de habilidade"
+    }
+
+    USER {
+        int id PK
+        string name
+        string role "Owner/User/View"
+        string login
+        string password_hash
+    }
+
+    TURN_CALENDAR {
+        int id PK
+        time start_time
+        time end_time
+        time lunch_start
+        time lunch_end
+        int standard_useful_minutes
+    }
+
+    MAINTENANCE_SCHEDULE {
+        int id PK
+        date ref_date
+        string scope "Geral/Individual"
+        int seamstress_id FK
+        int extra_minutes
+        string reason
+    } 

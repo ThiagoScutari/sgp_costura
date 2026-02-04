@@ -1,0 +1,12 @@
+---
+config:
+  layout: elk
+---
+flowchart LR
+    A["Monitorar Cronômetro"] --> B{"Carrinho chegou?"}
+    B -- Não --> A
+    B -- Sim --> C["Conferência Física Rápida"]
+    C --> D["Clicar em FINALIZAR no Dash"]
+    D --> E["Sistema registra finished_at"]
+    E --> F["Dashboard reseta Pulso 30 min"]
+    F --> G["Atualiza % de conclusão da OP"]

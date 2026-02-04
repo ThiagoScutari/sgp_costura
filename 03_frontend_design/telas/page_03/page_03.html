@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGP Costura - Gestão de Produtos e OPs</title>
+
+    <!-- Unified Theme & Layout -->
+    <link rel="stylesheet" href="../shared/theme.css">
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/layout.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .product-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .row-inactive {
+            opacity: 0.3;
+            filter: grayscale(100%);
+        }
+
+        .bg-reta {
+            background-color: rgba(33, 150, 243, 0.15);
+            border-left: 4px solid #2196F3;
+        }
+
+        .bg-overlock {
+            background-color: rgba(156, 39, 176, 0.15);
+            border-left: 4px solid #9C27B0;
+        }
+
+        .bg-cobertura {
+            background-color: rgba(255, 152, 0, 0.15);
+            border-left: 4px solid #FF9800;
+        }
+
+        .bg-catraca {
+            background-color: rgba(121, 85, 72, 0.15);
+            border-left: 4px solid #795548;
+        }
+
+        .bg-manual {
+            background-color: rgba(76, 175, 80, 0.15);
+            border-left: 4px solid #4CAF50;
+        }
+
+        .sortable-ghost {
+            opacity: 0.4;
+            background: #2194f2 !important;
+        }
+
+        .sortable-chosen {
+            background: #1c2732 !important;
+        }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body class="bg-[#0f1923] text-gray-200 min-h-screen">
+
+    <header class="bg-[#1b2227] border-b border-gray-800 p-4 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-4">
+                <h1 class="text-2xl font-black text-white">SGP Costura</h1>
+                <span class="text-gray-500">|</span>
+                <span class="text-sm font-bold text-gray-400 uppercase tracking-wide">Gestão de Produtos</span>
+            </div>
+            <div>
+                <input type="file" id="pdf-file-input" accept=".pdf" class="hidden" onchange="handleFileSelect(event)">
+                <button onclick="document.getElementById('pdf-file-input').click()"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 transition-all shadow-lg">
+                    <span class="material-symbols-outlined text-lg">upload_file</span>
+                    IMPORTAR PDF
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6">
+        <div class="mb-6">
+            <h2 class="text-xl font-black text-white mb-2">Produtos Importados</h2>
+            <p class="text-sm text-gray-400">Selecione um produto para configurar o balanceamento ou visualizar detalhes
+                das operações.</p>
+        </div>
+
+        <div id="product-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Products will be loaded here -->
+        </div>
+
+        <div id="empty-state" class="hidden text-center py-20">
+            <span class="material-symbols-outlined text-6xl text-gray-700 mb-4">inventory_2</span>
+            <p class="text-gray-500 font-bold">Nenhum produto importado ainda.</p>
+            <p class="text-gray-600 text-sm mt-2">Use o endpoint POST /api/pso/import para importar PDFs.</p>
+        </div>
+    </main>
+
+    <!-- Modal for Operation Details with Drag & Drop -->
+    <div id="details-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div class="bg-[#1b2227] rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden border border-gray-800">
+            <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                <div>
+                    <h3 id="modal-title" class="text-xl font-black text-white"></h3>
+                    <p id="modal-subtitle" class="text-sm text-gray-400"></p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="bg-gray-800/50 px-4 py-2 rounded-lg border border-gray-700 flex items-center gap-3">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase">Nome da Versão:</span>
+                        <input type="text" id="version-name-input" placeholder="Ex: V2-Ajustada"
+                            class="bg-gray-900 border border-gray-700 rounded w-40 px-3 py-1 text-center font-bold text-white outline-none focus:border-blue-500">
+                    </div>
+                    <div class="bg-gray-800/50 px-4 py-2 rounded-lg border border-gray-700 flex items-center gap-3">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase">Eficiência Global:</span>
+                        <input type="number" id="global-eff-input" value="80"
+                            oninput="applyGlobalEfficiency(this.value)"
+                            class="bg-gray-900 border border-blue-500/30 rounded w-16 text-center font-black text-blue-400 outline-none">
+                        <span class="text-blue-400 font-bold">%</span>
+                    </div>
+                    <button onclick="closeModal()" class="text-gray-400 hover:text-white">
+                        <span class="material-symbols-outlined text-3xl">close</span>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[60vh]">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-800/50 text-gray-400 text-[10px] font-black uppercase tracking-widest">
+                            <th class="p-3 w-12 text-center">Drag</th>
+                            <th class="p-3 w-16">Seq</th>
+                            <th class="p-3">Descrição</th>
+                            <th class="p-3 w-48">Máquina</th>
+                            <th class="p-3 w-32 text-right">TP Padrão (min)</th>
+                            <th class="p-3 w-32 text-center">Efic. (%)</th>
+                            <th class="p-3 w-32 text-right text-blue-400">TP Real (min)</th>
+                            <th class="p-3 w-24 text-center">Ativa</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modal-operations">
+                    </tbody>
+                </table>
+                <div
+                    class="mt-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg flex justify-between items-center">
+                    <p class="text-sm font-bold text-blue-400">Tempo Total (TP Real): <span id="modal-total-tp"></span>
+                    </p>
+                    <div class="flex gap-2">
+                        <button onclick="deletePSOVersion()"
+                            class="bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-lg font-black flex items-center gap-2 shadow-lg transition-all">
+                            <span class="material-symbols-outlined font-bold">delete</span>
+                            EXCLUIR VERSÃO
+                        </button>
+                        <button onclick="goToBalance()"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg font-black flex items-center gap-2 shadow-lg transition-all">
+                            <span class="material-symbols-outlined font-bold">tune</span>
+                            BALANCEAR
+                        </button>
+                        <button onclick="savePSOVersion()"
+                            class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-black flex items-center gap-2 shadow-lg transition-all">
+                            <span class="material-symbols-outlined font-bold">save</span>
+                            SALVAR NOVA VERSÃO
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8001/api";
+        let products = [];
+        let currentPsoData = null; // Stores current PSO context for saving
+
+        async function loadProducts() {
+            try {
+                const response = await fetch(`${API_URL}/products`);
+                const data = await response.json();
+
+                products = data.products || [];
+                renderProducts();
+            } catch (error) {
+                console.error("Error loading products:", error);
+                document.getElementById('empty-state').classList.remove('hidden');
+            }
+        }
+
+        function renderProducts() {
+            const container = document.getElementById('product-list');
+            const emptyState = document.getElementById('empty-state');
+
+            if (products.length === 0) {
+                container.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+            emptyState.classList.add('hidden');
+
+            container.innerHTML = products.map(product => `
+                <div class="product-card bg-[#1b2227] border border-gray-800 rounded-xl p-6 transition-all hover:border-blue-500/50">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 class="text-lg font-black text-white">${product.product_reference}</h3>
+                            <p class="text-sm text-gray-400">${product.product_description || 'Sem descrição'}</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <span class="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs font-bold rounded">${product.pso_version}</span>
+                            ${product.has_active_planning ? '<span class="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-bold rounded flex items-center gap-1"><span class="material-symbols-outlined text-xs">check_circle</span>EM PRODUÇÃO</span>' : ''}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="bg-gray-800/50 p-3 rounded-lg">
+                            <p class="text-xs text-gray-500 font-bold uppercase">TP Total</p>
+                            <p class="text-xl font-black text-blue-400">${product.total_tp_minutes ? product.total_tp_minutes.toFixed(2) : '0.00'} min</p>
+                        </div>
+                        <div class="bg-gray-800/50 p-3 rounded-lg">
+                            <p class="text-xs text-gray-500 font-bold uppercase">Operações</p>
+                            <p class="text-xl font-black text-white">${product.operation_count || 0}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button onclick="viewDetails(${product.pso_id})" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined text-sm">visibility</span>
+                            Ver Operações
+                        </button>
+                        <button onclick="openBalancing(${product.pso_id})" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined text-sm">tune</span>
+                            Balancear
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function viewDetails(psoId) {
+            try {
+                const response = await fetch(`${API_URL}/pso/${psoId}/details`);
+                const data = await response.json();
+
+                // Store PSO context for saving
+                currentPsoData = {
+                    pso_id: psoId,
+                    product_reference: data.product_reference,
+                    current_version: data.version_name
+                };
+
+                document.getElementById('modal-title').innerText = data.product_reference;
+
+                // Count active operations for display
+                const activeOps = data.operations.filter(op => op.ativa !== false).length;
+                document.getElementById('modal-subtitle').innerText = `${data.version_name} • ${data.operations.length} operações (${activeOps} ativas)`;
+
+                // Set default version name (increment version number)
+                const versionMatch = data.version_name.match(/V(\d+)/);
+                const nextVersion = versionMatch ? `V${parseInt(versionMatch[1]) + 1}` : 'V2';
+                document.getElementById('version-name-input').value = nextVersion;
+
+                // Load saved efficiency
+                const efficiency = (data.default_efficiency_factor || 1.0) * 100;
+                document.getElementById('global-eff-input').value = efficiency;
+
+                const tbody = document.getElementById('modal-operations');
+                tbody.innerHTML = data.operations.map((op, index) => {
+                    const opEfficiency = efficiency; // Use global efficiency for display
+                    const timeReal = (op.time_minutes || 0) / (opEfficiency / 100);
+                    const machineClass = getMachineClass((op.machine || '').toLowerCase());
+                    // Fix: Ensure we correctly interpret the boolean from API
+                    const isChecked = op.ativa === true || op.ativa === undefined; // Explicit check, default true
+
+
+                    return `
+                    <tr data-index="${index}" class="border-b border-gray-800 hover:bg-gray-800/30 transition-colors ${!isChecked ? 'row-inactive' : ''}">
+                        <td class="p-2 text-center">
+                            <span class="material-symbols-outlined text-gray-600 drag-handle cursor-grab active:cursor-grabbing">drag_indicator</span>
+                        </td>
+                        <td class="p-2">
+                            <input type="number" value="${op.sequence}" readonly
+                                   class="bg-gray-900/50 border border-gray-800 rounded w-12 p-2 text-center text-xs font-bold text-gray-500 cursor-not-allowed">
+                        </td>
+                        <td class="p-2">
+                            <input type="text" value="${op.description}" 
+                                   class="bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded w-full p-2 text-sm uppercase font-semibold text-white">
+                        </td>
+                        <td class="p-2">
+                            <div class="rounded-lg overflow-hidden ${machineClass}">
+                                <select class="bg-transparent w-full p-2 text-[10px] font-black uppercase cursor-pointer outline-none border-none">
+                                    <option value="reta" ${(op.machine || '').toLowerCase() === 'reta' ? 'selected' : ''}>RETA</option>
+                                    <option value="overlock" ${(op.machine || '').toLowerCase() === 'overlock' ? 'selected' : ''}>OVERLOCK</option>
+                                    <option value="cobertura" ${(op.machine || '').toLowerCase() === 'cobertura' ? 'selected' : ''}>COBERTURA</option>
+                                    <option value="catraca" ${(op.machine || '').toLowerCase() === 'catraca' ? 'selected' : ''}>CATRACA</option>
+                                    <option value="manual" ${(op.machine || '').toLowerCase() === 'manual' ? 'selected' : ''}>MANUAL</option>
+                                </select>
+                            </div>
+                        </td>
+                        <td class="p-2 text-right">
+                            <input type="number" step="0.0001" value="${(op.time_minutes || 0).toFixed(4)}" onchange="calculateTPInModal()" 
+                                   class="bg-gray-900 border border-gray-700 rounded w-28 p-2 text-right text-sm text-white focus:border-blue-500 op-time-input">
+                        </td>
+                        <td class="p-2 text-center">
+                            <input type="number" value="${opEfficiency}" onchange="calculateTPInModal()" 
+                                   class="bg-gray-900 border border-blue-500/30 rounded w-16 p-2 text-center text-sm font-bold text-blue-400 focus:ring-1 focus:ring-blue-500 op-eff-input">
+                        </td>
+                        <td class="p-2 text-right font-mono font-bold text-blue-400 op-time-real">
+                            ${timeReal.toFixed(4)}
+                        </td>
+                        <td class="p-2 text-center">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="calculateTPInModal()" class="w-5 h-5 rounded border-gray-700 bg-gray-900 text-blue-600 focus:ring-blue-500 op-status-check">
+                        </td>
+                    </tr>
+                `}).join('');
+
+                // Initialize SortableJS for drag-and-drop
+                new Sortable(tbody, {
+                    handle: '.drag-handle',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    chosenClass: 'sortable-chosen',
+                    onEnd: function (evt) {
+                        // Renumbering disabled to preserve original PDF sequence 
+                    }
+                });
+
+                calculateTPInModal(); // Chama o cálculo inicial
+                document.getElementById('details-modal').classList.remove('hidden');
+            } catch (error) {
+                console.error("Error loading details:", error);
+                alert("Erro ao carregar detalhes do PSO.");
+            }
+        }
+
+        // Nova função para recalcular o TP instantaneamente ao editar
+        function calculateTPInModal() {
+            const rows = document.querySelectorAll('#modal-operations tr');
+            let totalReal = 0;
+
+            rows.forEach(row => {
+                const timeInput = row.querySelector('.op-time-input');
+                const effInput = row.querySelector('.op-eff-input');
+                const statusCheck = row.querySelector('.op-status-check');
+                const timeRealCell = row.querySelector('.op-time-real');
+
+                if (timeInput && effInput && statusCheck && timeRealCell) {
+                    const timeStd = parseFloat(timeInput.value) || 0;
+                    const eff = parseFloat(effInput.value) || 100;
+                    const timeReal = timeStd / (eff / 100);
+
+                    // Atualiza a célula de TP Real
+                    timeRealCell.innerText = timeReal.toFixed(4);
+
+                    // Soma no total se estiver ativa
+                    if (statusCheck.checked) {
+                        totalReal += timeReal;
+                    }
+
+                    // Aplica estilo de inativa
+                    if (!statusCheck.checked) {
+                        row.classList.add('row-inactive');
+                    } else {
+                        row.classList.remove('row-inactive');
+                    }
+                }
+            });
+
+            // Atualiza o display no modal
+            const display = document.getElementById('modal-total-tp');
+            display.innerText = `${totalReal.toFixed(4)} min (${(totalReal * 60).toFixed(2)} s)`;
+        }
+
+        function getMachineClass(machine) {
+            const classes = {
+                reta: 'bg-reta text-blue-400',
+                overlock: 'bg-overlock text-purple-400',
+                cobertura: 'bg-cobertura text-orange-400',
+                catraca: 'bg-catraca text-amber-700',
+                manual: 'bg-manual text-green-400'
+            };
+            return classes[machine] || '';
+        }
+
+        function applyGlobalEfficiency(value) {
+            const eff = parseFloat(value) || 80;
+            const effInputs = document.querySelectorAll('.op-eff-input');
+            effInputs.forEach(input => {
+                input.value = eff;
+            });
+            calculateTPInModal();
+        }
+
+        function closeModal() {
+            document.getElementById('details-modal').classList.add('hidden');
+        }
+
+        async function savePSOVersion() {
+            if (!currentPsoData) {
+                alert('❌ Erro: Nenhum PSO carregado.');
+                return;
+            }
+
+            const versionName = document.getElementById('version-name-input').value.trim();
+            if (!versionName) {
+                alert('❌ Por favor, digite um nome para a versão.');
+                return;
+            }
+
+            // Collect all operations from the table in current order
+            const rows = document.querySelectorAll('#modal-operations tr');
+            const operations = [];
+
+            rows.forEach((row, index) => {
+                const descInput = row.querySelector('input[type="text"]');
+                const machineSelect = row.querySelector('select');
+                const timeInput = row.querySelector('.op-time-input');
+                const effInput = row.querySelector('.op-eff-input');
+                const statusCheck = row.querySelector('.op-status-check');
+
+                if (descInput && machineSelect && timeInput && effInput && statusCheck) {
+                    const timeStd = parseFloat(timeInput.value) || 0;
+                    const eff = parseFloat(effInput.value) || 100;
+                    const finalTime = timeStd / (eff / 100);
+
+                    // Use sequence from input if available, otherwise calculate (fallback)
+                    const seqInput = row.querySelector('input[readonly]');
+                    const seqValue = seqInput ? parseFloat(seqInput.value) : (index + 1) * 10;
+
+                    operations.push({
+                        ordem: seqValue,  // Use preserved sequence
+                        descricao: descInput.value,
+                        maquina_macro: machineSelect.value.toUpperCase(),
+                        minutos_decimais: finalTime,  // Use calculated real time
+                        ativa: statusCheck.checked
+                    });
+                }
+            });
+
+            if (operations.length === 0) {
+                alert('❌ Nenhuma operação encontrada para salvar.');
+                return;
+            }
+
+            // Prepare payload
+            const payload = {
+                referencia: currentPsoData.product_reference,
+                produto: currentPsoData.product_reference,  // Use same as reference
+                version_name: versionName,
+                default_efficiency_factor: parseFloat(document.getElementById('global-eff-input').value) / 100, // Send active global efficiency
+                operacoes: operations
+            };
+
+            const saveBtn = event.target;
+            const originalText = saveBtn.innerHTML;
+
+            try {
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span> SALVANDO...';
+
+                const response = await fetch(`${API_URL}/pso/save-version`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`✅ Versão "${versionName}" salva com sucesso!\n\nOperações: ${result.operation_count}\nTP Total: ${result.total_tp_minutes.toFixed(2)} min`);
+
+                    // Close modal and reload products
+                    closeModal();
+                    await loadProducts();
+                } else {
+                    alert(`❌ Erro ao salvar versão:\n${result.detail || 'Erro desconhecido'}`);
+                }
+
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalText;
+
+            } catch (error) {
+                console.error('Save error:', error);
+                alert(`❌ Erro de conexão ao salvar versão:\n${error.message}`);
+
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalText;
+            }
+        }
+
+        function goToBalance() {
+            if (!currentPsoData || !currentPsoData.pso_id) {
+                alert('⚠️ Salve ou selecione uma versão válida antes de balancear.');
+                return;
+            }
+            // Redirect to Page 04 with active PSO ID
+            window.location.href = `../page_04/page_04.html?pso_id=${currentPsoData.pso_id}`;
+        }
+
+        async function deletePSOVersion() {
+            if (!currentPsoData || !currentPsoData.pso_id) {
+                alert('❌ Erro: Nenhuma versão selecionada para excluir.');
+                return;
+            }
+
+            if (!confirm(`⚠️ ATENÇÃO: Deseja realmente excluir a versão "${currentPsoData.current_version}"?\n\nEssa ação é irreversível e excluirá todas as operações vinculadas.`)) {
+                return;
+            }
+
+            const deleteBtn = event.target;
+            const originalText = deleteBtn.innerHTML;
+
+            try {
+                deleteBtn.disabled = true;
+                deleteBtn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span> EXCLUINDO...';
+
+                const response = await fetch(`${API_URL}/pso/${currentPsoData.pso_id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert(`✅ Versão excluída com sucesso!`);
+                    closeModal();
+                    await loadProducts();
+                } else {
+                    const error = await response.json();
+                    alert(`❌ Erro ao excluir versão:\n${error.detail || 'Erro desconhecido'}`);
+                }
+            } catch (error) {
+                console.error("Delete error:", error);
+                alert(`❌ Erro de conexão ao excluir versão:\n${error.message}`);
+            } finally {
+                if (deleteBtn) {
+                    deleteBtn.disabled = false;
+                    deleteBtn.innerHTML = originalText;
+                }
+            }
+        }
+
+        async function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (file.type !== 'application/pdf') {
+                alert('❌ Por favor, selecione um arquivo PDF válido.');
+                event.target.value = '';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const uploadBtn = document.querySelector('button[onclick*="pdf-file-input"]');
+
+            try {
+                // Show loading state
+                const originalText = uploadBtn.innerHTML;
+                uploadBtn.disabled = true;
+                uploadBtn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span> IMPORTANDO...';
+
+                const response = await fetch(`${API_URL}/pso/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`✅ PSO importado com sucesso!\n\nProduto: ${result.product_reference}\nOperações: ${result.operation_count}\nTP Total: ${result.total_tp_minutes.toFixed(2)} min`);
+                    // Reload products list
+                    await loadProducts();
+                } else {
+                    alert(`❌ Erro ao importar PDF:\n${result.detail || 'Erro desconhecido'}`);
+                }
+
+                // Reset button
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = originalText;
+                event.target.value = '';
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                alert(`❌ Erro de conexão ao importar PDF:\n${error.message}`);
+
+                // Reset button
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '<span class="material-symbols-outlined text-lg">upload_file</span> IMPORTAR PDF';
+                event.target.value = '';
+            }
+        }
+
+        function openBalancing(psoId) {
+            window.location.href = `../page_04/page_04.html?pso_id=${psoId}`;
+        }
+
+        // Load products on page load
+        window.onload = () => {
+            loadProducts();
+        };
+        setInterval(loadProducts, 30000); // Refresh every 30s
+    </script>
+</body>
+
+</html>

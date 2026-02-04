@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGP Costura - Monitor de Fábrica</title>
+
+    <!-- Unified Theme & Layout -->
+    <link rel="stylesheet" href="../shared/theme.css">
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/layout.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .animate-pulse-fast {
+            animation: pulse 0.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .3;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-[#0f1923] text-white antialiased min-h-screen pb-24">
+
+    <header
+        class="sticky top-0 z-50 bg-[#0f1923]/90 backdrop-blur-md border-b border-gray-800 p-4 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <div class="relative flex size-3">
+                <span
+                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4CAF50] opacity-75"></span>
+                <span class="relative inline-flex rounded-full size-3 bg-[#4CAF50]"></span>
+            </div>
+            <h1 class="font-bold text-lg tracking-tight">SGP - Sistema VAC</h1>
+        </div>
+        <div class="flex items-center gap-2 bg-gray-800 px-3 py-1 rounded-lg border border-gray-700">
+            <span class="material-symbols-outlined text-sm text-blue-400">manufacturing</span>
+            <span id="current-op" class="text-xs font-bold text-gray-300">OP: --</span>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto p-4 space-y-4">
+
+        <div id="timer-card"
+            class="transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-blue-600">
+            <p id="timer-status" class="text-white/80 text-xs font-extrabold uppercase tracking-[0.2em] mb-1">Pulso
+                Ativo</p>
+            <div id="main-timer" class="text-7xl font-black tracking-tighter mb-2">00:00</div>
+            <div class="flex justify-center items-center gap-2 text-white/90 text-sm font-bold">
+                <span class="material-symbols-outlined text-lg">event_repeat</span>
+                <span>Próximo Lote em: <span id="next-batch-time">--:--</span></span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-[#1b2227] border border-gray-800 p-5 rounded-2xl flex items-center justify-between">
+                <div>
+                    <p class="text-gray-400 text-xs font-bold uppercase mb-1">Eficiência</p>
+                    <p id="efficiency-value" class="text-3xl font-black text-white">--</p>
+                    <p id="efficiency-delta" class="text-[#4CAF50] text-[10px] font-bold">--</p>
+                </div>
+                <div class="relative size-16 flex items-center justify-center">
+                    <svg class="size-full" viewBox="0 0 36 36">
+                        <path class="text-gray-700" stroke-width="3" stroke="currentColor" fill="none"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <path id="efficiency-circle" class="text-[#4CAF50]" stroke-width="3" stroke-dasharray="0, 100"
+                            stroke-linecap="round" stroke="currentColor" fill="none"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    </svg>
+                    <span class="absolute material-symbols-outlined text-[#4CAF50]">bolt</span>
+                </div>
+            </div>
+
+            <div class="bg-[#1b2227] border border-gray-800 p-5 rounded-2xl space-y-3">
+                <div class="flex justify-between items-end">
+                    <p class="text-gray-400 text-xs font-bold uppercase">Progresso OP</p>
+                    <p class="text-blue-400 text-sm font-black">Lote <span id="batch-current">0</span> de <span
+                            id="batch-total">--</span></p>
+                </div>
+                <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                    <div id="progress-bar" class="bg-blue-500 h-full transition-all duration-1000" style="width: 0%">
+                    </div>
+                </div>
+                <p id="progress-text" class="text-gray-500 text-[10px] font-medium">0% do total da OP</p>
+            </div>
+        </div>
+
+        <section class="space-y-3">
+            <h3 class="text-gray-400 text-xs font-extrabold uppercase tracking-widest px-1">Carrinhos na Pista</h3>
+
+            <div id="cart-list" class="space-y-3">
+            </div>
+        </section>
+    </main>
+
+    <nav
+        class="fixed bottom-0 left-0 right-0 h-20 bg-[#0f1923]/95 backdrop-blur-lg border-t border-gray-800 flex items-center justify-around px-6 pb-4">
+        <button class="flex flex-col items-center gap-1 text-blue-500">
+            <span class="material-symbols-outlined">dashboard</span>
+            <span class="text-[10px] font-bold">MONITOR</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 text-gray-500">
+            <span class="material-symbols-outlined">inventory_2</span>
+            <span class="text-[10px] font-bold">LOTES</span>
+        </button>
+        <button class="flex flex-col items-center gap-1 text-gray-500">
+            <span class="material-symbols-outlined">analytics</span>
+            <span class="text-[10px] font-bold">EFICIÊNCIA</span>
+        </button>
+    </nav>
+
+    <script>
+        const API_URL = "http://localhost:8001/api";
+        let intervalId = null;
+
+        async function fetchDashboardData() {
+            try {
+                const response = await fetch(`${API_URL}/dashboard/active-status`);
+                const data = await response.json();
+
+                // Check if production is idle
+                if (data.status === 'idle') {
+                    showIdleState(data);
+                    return;
+                }
+
+                updateDashboard(data);
+            } catch (error) {
+                console.error("Dashboard Sync Error:", error);
+            }
+        }
+
+        function showIdleState(data) {
+            // Update header
+            document.querySelector("header h1").innerText = `SGP - Monitor: ${data.product || 'Aguardando'}`;
+            document.getElementById('current-op').innerText = 'OP: --';
+
+            // Update timer card to idle state (gray, no pulsing)
+            const timerCard = document.getElementById('timer-card');
+            const timerStatus = document.getElementById('timer-status');
+            const mainTimer = document.getElementById('main-timer');
+            const nextBatchTime = document.getElementById('next-batch-time');
+
+            timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-gray-700 text-white";
+            timerStatus.innerText = "AGUARDANDO INÍCIO";
+            mainTimer.innerText = "--:--";
+            nextBatchTime.innerText = "--:--";
+
+            // Update progress info
+            document.getElementById('batch-current').innerText = '0';
+            if (document.getElementById('batch-total')) {
+                document.getElementById('batch-total').innerText = '--';
+            }
+            document.getElementById('progress-bar').style.width = '0%';
+            if (document.getElementById('progress-text')) {
+                document.getElementById('progress-text').innerText = '0% do total da OP';
+            }
+
+            // Update efficiency
+            if (document.getElementById('efficiency-value')) {
+                document.getElementById('efficiency-value').innerText = '--';
+            }
+            if (document.getElementById('efficiency-delta')) {
+                document.getElementById('efficiency-delta').innerText = '--';
+            }
+            if (document.getElementById('efficiency-circle')) {
+                document.getElementById('efficiency-circle').setAttribute('stroke-dasharray', '0, 100');
+            }
+
+            // Show idle message in workstations list
+            const list = document.getElementById('cart-list');
+            list.innerHTML = `
+                <div class="text-center py-16">
+                    <span class="material-symbols-outlined text-7xl text-gray-600 mb-4 block">schedule</span>
+                    <p class="text-gray-300 font-bold text-xl mb-2">Aguardando Início de Produção</p>
+                    <p class="text-gray-500 text-sm">${data.message || 'Nenhuma OP ativa no momento'}</p>
+                </div>
+            `;
+        }
+
+        function updateDashboard(data) {
+            // 1. Header Info
+            document.querySelector("header h1").innerText = `SGP - Monitor: ${data.product}`;
+            document.getElementById('current-op').innerText = `OP: ${data.product}`;
+
+            // 2. Timer Card (Pulse Status)
+            const timerCard = document.getElementById('timer-card');
+            const timerStatus = document.getElementById('timer-status');
+            const mainTimer = document.getElementById('main-timer');
+            const nextBatchTime = document.getElementById('next-batch-time');
+
+            const elapsed = data.elapsed_seconds;
+            const pulseDuration = data.pulse_duration * 60; // Convert minutes to seconds
+            const isDelayed = elapsed > pulseDuration;
+
+            // Format elapsed time
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = Math.floor(elapsed % 60);
+            mainTimer.innerText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+            // Calculate next batch time
+            const remaining = pulseDuration - elapsed;
+            if (remaining > 0) {
+                const remMin = Math.floor(remaining / 60);
+                const remSec = Math.floor(remaining % 60);
+                nextBatchTime.innerText = `${String(remMin).padStart(2, '0')}:${String(remSec).padStart(2, '0')}`;
+            } else {
+                nextBatchTime.innerText = "ATRASADO";
+            }
+
+            // Update card color based on status
+            if (isDelayed) {
+                timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-red-600 text-white animate-pulse-fast";
+                timerStatus.innerText = "ATRASADO";
+            } else if (elapsed > pulseDuration * 0.8) {
+                timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-yellow-500 text-black";
+                timerStatus.innerText = "ATENÇÃO";
+            } else {
+                timerCard.className = "transition-colors duration-500 p-8 rounded-2xl shadow-2xl text-center border-b-4 border-black/20 bg-blue-600 text-white";
+                timerStatus.innerText = "PULSO ATIVO";
+            }
+
+            // 3. Efficiency Card (if available)
+            if (data.efficiency !== undefined) {
+                const effValue = data.efficiency;
+                const effFormatted = effValue.toLocaleString('pt-BR', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0
+                });
+                document.getElementById('efficiency-value').innerText = `${effFormatted}%`;
+
+                // Update circle
+                const circle = document.getElementById('efficiency-circle');
+                if (circle) {
+                    circle.setAttribute('stroke-dasharray', `${effValue}, 100`);
+                }
+
+                // Delta from target (example: 90% target)
+                const target = 90;
+                const delta = effValue - target;
+                const deltaEl = document.getElementById('efficiency-delta');
+                if (deltaEl) {
+                    if (delta > 0) {
+                        deltaEl.innerText = `+${delta.toFixed(1)}% meta`;
+                        deltaEl.className = 'text-[#4CAF50] text-[10px] font-bold';
+                    } else {
+                        deltaEl.innerText = `${delta.toFixed(1)}% meta`;
+                        deltaEl.className = 'text-red-500 text-[10px] font-bold';
+                    }
+                }
+            }
+
+            // 4. Progress Bar
+            const currentBatch = data.carts_produced || 0;
+            const totalBatches = data.total_batches || 24;
+            const progressPercent = totalBatches > 0 ? ((currentBatch / totalBatches) * 100) : 0;
+
+            document.getElementById('batch-current').innerText = currentBatch;
+            if (document.getElementById('batch-total')) {
+                document.getElementById('batch-total').innerText = totalBatches;
+            }
+            document.getElementById('progress-bar').style.width = `${progressPercent}%`;
+
+            const remainingBatches = totalBatches - currentBatch;
+            const progressFormatted = progressPercent.toLocaleString('pt-BR', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            });
+            if (document.getElementById('progress-text')) {
+                document.getElementById('progress-text').innerText = `${progressFormatted}% do total da OP • Faltam ${remainingBatches} lotes`;
+            }
+
+            // 5. Workstation List
+            const list = document.getElementById('cart-list');
+            document.querySelector("section h3").innerText = "CÉLULA ATIVA (COSTUREIRAS)";
+            <div class="flex h-16 items-center justify-between rounded-xl bg-[#1b2227] border border-gray-800 px-4 mb-2">
+                <div class="flex items-center gap-3">
+                    <div class="bg-blue-500/20 text-blue-400 font-black text-xs px-2 py-1 rounded">0${ws.position || i + 1}</div>
+                    <div>
+                        <p class="text-white font-bold text-sm uppercase">${ws.seamstress_name}</p>
+                        <p class="text-gray-500 text-[10px] font-bold uppercase">${ws.load_count} Operações</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="relative flex size-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+                    </span>
+                    <span class="text-[10px] font-bold text-green-500 uppercase">${ws.status}</span>
+                </div>
+            </div>
+                `).join('');
+            }
+        }
+
+        // Init
+        fetchDashboardData();
+        intervalId = setInterval(fetchDashboardData, 1000); // Poll every second for timer precision
+
+
+    </script>
+</body>
+
+</html>

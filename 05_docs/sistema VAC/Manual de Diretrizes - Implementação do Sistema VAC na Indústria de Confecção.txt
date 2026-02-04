@@ -1,0 +1,161 @@
+Manual de Diretrizes: Implementação do Sistema VAC (Velocidade de Atravessamento Constante) na Indústria de Confecção
+
+1. Fundamentos e Objetivos Estratégicos do Sistema VAC
+
+No cenário de alta volatilidade e sazonalidade que define o mercado de moda contemporâneo, a flexibilidade produtiva e a redução drástica do lead time deixaram de ser diferenciais para se tornarem imperativos de sobrevivência. O sistema de Velocidade de Atravessamento Constante (VAC) surge como uma resposta estratégica a essa demanda, transformando a produção em um fluxo rítmico, previsível e altamente ágil.
+
+Fundamentação Teórica e Histórica
+
+Concebido por Caetano Caruso e Nélio Dias em 1989, o sistema VAC foi consolidado após dois anos de experimentação em uma Camisaria, tendo sua primeira implementação oficial registrada na Walery Confecções (Juiz de Fora - MG) em 1993. Sua eficácia reside na integração sinérgica de três pilares da Engenharia de Produção:
+
+* Filosofia Just-in-Time (JIT): Foco na eliminação de desperdícios e na produção da quantidade exata no momento demandado.
+* Sistema Kanban: Controle visual de fluxo que dita o ritmo produtivo e o reabastecimento.
+* Teoria das Restrições (TOC): Identificação e subordinação do fluxo aos gargalos, garantindo o equilíbrio da capacidade industrial.
+
+Análise do Valor Agregado
+
+O VAC visa elevar a competitividade industrial através da redução de estoques intermediários (WIP), garantindo previsibilidade de entrega e aumento real da produtividade. Contudo, a eficácia do sistema é estritamente dependente da precisão cirúrgica dos dados coletados na fase de análise técnica; qualquer inconsistência na base de tempos comprometerá a estabilidade de toda a mini-fábrica.
+
+
+--------------------------------------------------------------------------------
+
+
+2. Fase 1: Planilha de Sequência Operacional (PSO) e Cronoanálise
+
+É imperativo mapear a sequência lógica de produção antes de qualquer intervenção física no chão de fábrica. A Planilha de Sequência Operacional (PSO) constitui a "espinha dorsal" do projeto, definindo o roteiro técnico e as interdependências do produto.
+
+Construção da PSO
+
+A PSO deve detalhar cada operação, classificando-as por tipo de máquina (ex: INT - Interlock, PESP - Pespontadeira, R1EL - Reta Eletrônica, OV3 - Overlock) e identificando dependências operacionais rígidas.
+
+Exemplo Técnico (Boné 1):
+
+* Operação 1: Unir frente (Máquina: INT).
+* Operação 3: Pespontar frente (Máquina: PESP) — Dependência: Operação 1.
+* Operação 6: Circular aba (Máquina: R1EL).
+
+Metodologia de Estudo de Tempos
+
+O Tempo Padrão (TP) é a variável mestre de controle. É mandatório a execução de cronometragem decimal seguindo rigorosos critérios:
+
+1. Determinação de Ciclos: Observação de múltiplos ciclos para mitigar variações anômalas.
+2. Avaliação do Ritmo (V): O cronometrista não deve buscar o "ritmo de atleta", mas sim um ritmo mediano e sustentável (Ritmo 100%), garantindo a estabilidade do sistema a longo prazo.
+3. Fator de Tolerância (FT): Aplicação de margens para fadiga e necessidades pessoais. Utiliza-se, por norma, 18% para operações em máquinas e 16% para operações manuais.
+
+Fórmulas de Controle:
+
+* TN = TC \times V (Onde TC é a média do tempo cronometrado e V o ritmo).
+* TP = TN \times FT.
+
+
+--------------------------------------------------------------------------------
+
+
+3. Fase 2: Pulso de Produção (TL) e Balanceamento de Carga
+
+O sistema VAC opera sob a lógica de pulsos rítmicos. O tempo é fracionado em unidades de gestão visual de 30 minutos, transformando o relógio na principal ferramenta de PCP do chão de fábrica.
+
+Cálculo do Tamanho do Lote (TL)
+
+O lote, ou Pulso de Produção, é dimensionado para que o coletivo de operadores processe o volume integral dentro do intervalo de 30 minutos. 
+
+TL = (Nº de operadores * 30 min) / TP 
+
+Nota: O resultado deve ser **rigorosamente arredondado para o inteiro inferior**. Isso garante que a carga de trabalho nunca exceda a capacidade temporal, mantendo a fluidez do fluxo.
+
+Sistematização do Balanceamento
+
+As operações são distribuídas para que a carga individual aproxime-se do limite de 30 minutos por lote.
+
+Exemplo de Balanceamento (Montagem Especial):
+
+Operador	Máquina	Operação	Tempo Unit.	Peças	Carga Total (min)
+A	INT	Fechar frente com lateral	0,13	138	17,94
+A	INT	Fechar traseiro com lateral	0,12	70	8,40 (Total: 26,34)
+B	PESP	Pespontar lateral com frente	0,13	100	13,00
+D	INT	Fechar cabeça	0,22	138	30,36
+
+Intervenção do Consultor: Casos como o do Operador D (30,36 min), que excedem marginalmente o pulso de 30 minutos, representam gargalos potenciais. Nestas situações, é mandatória a aplicação de Ajuda Mútua ou o rebalanceamento de micro-tarefas para evitar o represamento do fluxo.
+
+
+--------------------------------------------------------------------------------
+
+
+4. Fase 3: Layout Celular e Estrutura de Mini-Fábricas
+
+A transição do layout funcional para o layout celular é o que viabiliza a redução de transportes e movimentações inúteis. A estrutura foca na criação de mini-fábricas autônomas.
+
+Configuração da Célula
+
+* 1 Líder de Mini-Fábrica: Supervisor técnico focado na resolução imediata de conflitos.
+* Operadores Polivalentes: Essenciais para absorver variações de carga.
+* 1 Montador de Carrinhos: Garante a qualidade e o abastecimento completo de partes e aviamentos.
+
+Infraestrutura e Gestão Visual
+
+* Carrinhos de Transporte: Módulos móveis que contêm o lote completo.
+* Pistas Pintadas: É uma regra "hard" do layout a existência de pistas delimitadas no chão para circulação dos carrinhos.
+* Desacopladores do Controle de Produção: Utilização de quadrados Kanban entre estações para proporcionar flexibilidade e absorver pequenas variabilidades sem interromper o fluxo global.
+* Quadros Suspensos: Registram a conclusão de cada carrinho a cada 30 minutos. A ausência de marcação sinaliza imediatamente um "carrinho perdido".
+
+
+--------------------------------------------------------------------------------
+
+
+5. Fase 4: Gestão Operacional e Controle de 30 Minutos
+
+No VAC, o diagnóstico de produtividade é instantâneo. Problemas ocorridos no início do turno são resolvidos em minutos, não ao final do dia.
+
+Dinâmica do Fluxo e a "Regra de Ouro"
+
+Embora a produção seja disparada por ordens de fabricação, o ritmo é puxado pelo tempo.
+
+* Proibição de Pular Carrinhos: Esta é a regra fundamental. Se um time atrasa, o problema deve ser exposto e resolvido. Pular um lote atrasado mascara a ineficiência e quebra a disciplina do sistema.
+* Ajuda Mútua: Operadores adiantados devem obrigatoriamente auxiliar colegas em atraso para normalizar o pulso da mini-fábrica.
+
+Gerenciamento de Desvios (Ishikawa)
+
+Os atrasos devem ser analisados sob a ótica dos 6Ms, utilizando exemplos reais do chão de fábrica:
+
+* Máquina: Quebras frequentes de Traveti e Pespontadeira.
+* Medida: Falta de regulagem de pontos nas máquinas.
+* Ambiente: Desorganização com peças no chão, obstruindo o fluxo.
+* Mão de Obra: Falta de treinamento técnico ou comunicação da liderança.
+
+
+--------------------------------------------------------------------------------
+
+
+6. Análise de Resultados e Indicadores de Desempenho (KPIs)
+
+A validação do sistema VAC é sustentada por ganhos quantitativos drásticos na eficiência produtiva.
+
+Projeção de Melhorias Documentadas
+
+* Eficiência Global: Salto de 30% para 76% na relação entre produção efetiva e capacidade.
+* Incrementos por Setor:
+  * 20% nos setores de Preparação/Aba e Montagem 6 Gomos.
+  * 14% no setor de Montagem Especial.
+  * 12% no setor de Acabamento.
+
+Matriz de Vantagens e Desafios
+
+Vantagens	Desafios / Desvantagens
+Redução drástica do Lead Time	Necessidade de alto número de máquinas
+Fim da ociosidade da mão de obra	Exigência de polivalência técnica absoluta
+Gestão visual em tempo real	Baixo nível de escolaridade como barreira ao treinamento
+Previsibilidade total de entrega	Ociosidade eventual de equipamentos específicos
+
+
+--------------------------------------------------------------------------------
+
+
+7. Diretrizes para Sustentabilidade do Sistema
+
+Para evitar o retrocesso aos métodos convencionais de "empurrar peças", o gestor deve assegurar:
+
+1. Investimento em Polivalência: Treinamento contínuo para que as costureiras operem múltiplas máquinas, mitigando riscos de absenteísmo e gargalos de balanceamento.
+2. Manutenção Preventiva de Fluxo: É mandatória a estratégia de troca de horário (almoço/entraturno) para que a equipe mecânica realize inspeções superficiais e regulagens sem interromper o pulso produtivo.
+3. Disciplina de Qualidade: Rigor na organização do ambiente. O sistema VAC é visual; peças fora do carrinho ou no chão são sinais de colapso do método.
+
+A implementação do VAC não é apenas uma alteração de layout, mas a transição de uma cultura de volume para uma cultura de gestão rítmica do tempo.

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGP Costura - Dashboard BI</title>
+
+    <!-- Unified Theme & Layout -->
+    <link rel="stylesheet" href="../shared/theme.css">
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/layout.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .bg-card {
+            background-color: #1b2227;
+            border: 1px solid #2d3748;
+        }
+    </style>
+</head>
+
+<body class="bg-[#0f1923] text-gray-200 min-h-screen pb-12">
+
+    <header class="bg-[#1b2227] border-b border-gray-800 p-6 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-blue-400">monitoring</span>
+                <h1 class="text-xl font-black uppercase tracking-tight">Relatórios de Eficiência</h1>
+            </div>
+            <div class="flex gap-4 w-full md:w-auto">
+                <div class="relative flex-1 md:w-80">
+                    <select id="opFilter" onchange="onOPFilterChange()"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-500 appearance-none">
+                        <option value="">Carregando OPs...</option>
+                    </select>
+                    <span
+                        class="material-symbols-outlined absolute right-3 top-3 text-gray-500 pointer-events-none">expand_more</span>
+                </div>
+                <button onclick="refreshDashboard()"
+                    class="bg-blue-600 px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center">
+                    <span class="material-symbols-outlined">refresh</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto p-6 space-y-8">
+
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-card p-6 rounded-2xl flex flex-col justify-between">
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Eficiência Global</p>
+                <div class="flex items-end justify-between mt-2">
+                    <h2 id="efficiency-value" class="text-3xl font-black text-gray-600 whitespace-nowrap">--</h2>
+                    <span class="material-symbols-outlined text-4xl text-[#4CAF50]/10">speed</span>
+                </div>
+                <div class="mt-4 w-full bg-gray-800 h-1 rounded-full">
+                    <div id="efficiency-bar" class="bg-[#4CAF50] h-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="bg-card p-6 rounded-2xl flex flex-col justify-between">
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Peças Produzidas (Atual/Total
+                    OP)</p>
+                <div class="flex items-end justify-between mt-2 overflow-hidden">
+                    <h2 id="pieces-value" class="text-3xl font-black text-white whitespace-nowrap">-- <span
+                            class="text-gray-600 text-lg">/
+                            --</span></h2>
+                    <span class="material-symbols-outlined text-4xl text-blue-500/10">inventory_2</span>
+                </div>
+                <p id="pieces-progress" class="text-[10px] text-blue-400 font-bold mt-4 uppercase">-- do total da
+                    Ordem</p>
+            </div>
+
+            <div class="bg-card p-6 rounded-2xl flex flex-col justify-between">
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Fluxo de Carrinhos (Real/Total
+                    OP)</p>
+                <div class="flex items-end justify-between mt-2">
+                    <h2 id="carts-value" class="text-4xl font-black text-white">-- <span
+                            class="text-gray-600 text-2xl">/ --</span></h2>
+                    <span class="material-symbols-outlined text-4xl text-yellow-500/10">shopping_cart</span>
+                </div>
+                <p class="text-[10px] text-yellow-500 font-bold mt-4 uppercase">Carrinhos processados até agora</p>
+            </div>
+        </section>
+
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-card p-8 rounded-3xl">
+                <h3 class="text-xs font-black uppercase tracking-widest text-gray-400 mb-6 text-center">Produção por
+                    Hora (Peças)</h3>
+                <div class="h-64">
+                    <canvas id="barChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-card p-8 rounded-3xl">
+                <h3 class="text-xs font-black uppercase tracking-widest text-gray-400 mb-6 text-center">Ocupação por
+                    Tipo de Máquina (%)</h3>
+                <div class="h-64">
+                    <canvas id="radarMachineChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-card rounded-3xl overflow-hidden p-8">
+            <h3 class="text-sm font-black uppercase tracking-widest text-gray-400 mb-8 flex items-center gap-2">
+                <span class="material-symbols-outlined text-blue-400">schedule</span>
+                Performance de Entrega (Lead Time Carrinhos)
+            </h3>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
+                <div class="h-56">
+                    <canvas id="cartStatusChart"></canvas>
+                </div>
+
+                <div class="col-span-2 space-y-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="p-4 bg-gray-900/50 rounded-xl border border-green-500/20">
+                            <p class="text-[10px] font-bold text-green-500 uppercase">Antecipados</p>
+                            <h4 id="early-count" class="text-2xl font-black">00</h4>
+                            <p id="early-percent" class="text-[9px] text-gray-500">0.0% do total</p>
+                        </div>
+                        <div class="p-4 bg-gray-900/50 rounded-xl border border-blue-500/20">
+                            <p class="text-[10px] font-bold text-blue-400 uppercase">No Tempo (VAC)</p>
+                            <h4 id="ontime-count" class="text-2xl font-black">00</h4>
+                            <p id="ontime-percent" class="text-[9px] text-gray-500">0.0% do total</p>
+                        </div>
+                        <div class="p-4 bg-gray-900/50 rounded-xl border border-red-500/20">
+                            <p class="text-[10px] font-bold text-red-500 uppercase">Atrasados</p>
+                            <h4 id="delayed-count" class="text-2xl font-black">00</h4>
+                            <p id="delayed-percent" class="text-[9px] text-gray-500">0.0% do total</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-800/30 p-4 rounded-xl">
+                        <p class="text-xs text-gray-400 leading-relaxed italic">
+                            * Carrinhos Antecipados são finalizados antes de 80% do pulso.
+                            Atrasados excederam o limite técnico definido no balanceamento.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const API_URL = "http://localhost:8001/api";
+
+        Chart.defaults.color = '#718096';
+        Chart.defaults.font.family = 'Inter';
+
+        let barChart, radarChart, cartStatusChart;
+
+        async function fetchAnalytics() {
+            try {
+                showLoadingState();
+                const response = await fetch(`${API_URL}/analytics/dashboard?hours=8`);
+                const data = await response.json();
+
+                // Check for empty data
+                if (!data || !data.hourly_breakdown || data.hourly_breakdown.length === 0) {
+                    showEmptyState();
+                    return;
+                }
+
+                updateDashboard(data);
+            } catch (error) {
+                console.error("Analytics Error:", error);
+                showEmptyState();
+            }
+        }
+
+        function showLoadingState() {
+            document.getElementById('efficiency-value').innerText = '...';
+            document.getElementById('pieces-value').innerHTML = '... <span class="text-gray-600 text-lg">/ ...</span>';
+            document.getElementById('carts-value').innerHTML = '... <span class="text-gray-600 text-2xl">/ ...</span>';
+        }
+
+        function showEmptyState() {
+            const main = document.querySelector('main');
+            main.innerHTML = `
+                <div class="text-center py-20">
+                    <span class="material-symbols-outlined text-8xl text-gray-700 mb-4 block">analytics</span>
+                    <h3 class="text-2xl font-bold text-gray-400 mb-2">Aguardando Dados de Produção</h3>
+                    <p class="text-gray-500">Os indicadores serão exibidos assim que houver registros de produção.</p>
+                    <p class="text-gray-600 text-sm mt-4">Inicie uma OP e registre bipes na Tela 05 (Checklist Final) para gerar analytics.</p>
+                </div>
+            `;
+        }
+
+        function updateDashboard(data) {
+            // Update Efficiency Card with Brazilian formatting
+            const effValue = data.efficiency.current;
+            const effColor = effValue >= 80 ? '#4CAF50' : effValue >= 60 ? '#FFA726' : '#F44336';
+            const effFormatted = effValue.toLocaleString('pt-BR', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            });
+            document.getElementById('efficiency-value').innerText = `${effFormatted}%`;
+            document.getElementById('efficiency-value').style.color = effColor;
+            document.getElementById('efficiency-bar').style.width = `${Math.min(effValue, 100)}%`;
+            document.getElementById('efficiency-bar').style.backgroundColor = effColor;
+
+            // Update Production Volume Card with Brazilian formatting
+            const targetVol = data.production_volume.target_volume || 0;
+            const currentPieces = data.production_volume.total_pieces;
+            const currentFormatted = currentPieces.toLocaleString('pt-BR');
+            const targetFormatted = targetVol.toLocaleString('pt-BR');
+            document.getElementById('pieces-value').innerHTML = `${currentFormatted} <span class="text-gray-600 text-lg">/ ${targetFormatted}</span>`;
+
+            const progress = targetVol > 0 ? (currentPieces / targetVol * 100) : 0;
+            const progressFormatted = progress.toLocaleString('pt-BR', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            });
+            document.getElementById('pieces-progress').innerText = `${progressFormatted}% do total da Ordem`;
+
+            // Update Carts Card with Brazilian formatting
+            const currentCarts = data.production_volume.total_batches;
+            const totalCarts = data.production_volume.target_batches || 24;
+            document.getElementById('carts-value').innerHTML = `${currentCarts} <span class="text-gray-600 text-2xl">/ ${totalCarts}</span>`;
+
+            // Update Bar Chart (Hourly Production)
+            const hours = data.hourly_breakdown.map(h => h.hour);
+            const pieces = data.hourly_breakdown.map(h => h.pieces);
+            const targets = data.hourly_breakdown.map(h => h.target || 120);
+
+            if (barChart) barChart.destroy();
+            barChart = new Chart(document.getElementById('barChart'), {
+                type: 'bar',
+                data: {
+                    labels: hours,
+                    datasets: [
+                        { label: 'Meta', data: targets, backgroundColor: '#2d3748', borderRadius: 4 },
+                        { label: 'Real', data: pieces, backgroundColor: '#359EFF', borderRadius: 4 }
+                    ]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { grid: { color: '#2d3748' } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Update Delay Status Chart with real data
+            const earlyCount = data.delay_rate.early_count || 0;
+            const onTimeCount = data.delay_rate.on_time_count || 0;
+            const delayedCount = data.delay_rate.delayed_count || 0;
+            const totalCount = data.delay_rate.total_count || 1;
+
+            if (cartStatusChart) cartStatusChart.destroy();
+            cartStatusChart = new Chart(document.getElementById('cartStatusChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Antecipados', 'No Tempo', 'Atrasados'],
+                    datasets: [{
+                        data: [earlyCount, onTimeCount, delayedCount],
+                        backgroundColor: ['#4CAF50', '#359EFF', '#F44336'],
+                        borderWidth: 0,
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    cutout: '75%',
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // Update status cards with Brazilian formatting
+            document.getElementById('early-count').innerText = earlyCount.toString().padStart(2, '0');
+            document.getElementById('ontime-count').innerText = onTimeCount.toString().padStart(2, '0');
+            document.getElementById('delayed-count').innerText = delayedCount.toString().padStart(2, '0');
+
+            // Update percentages with Brazilian formatting
+            const earlyPercent = ((earlyCount / totalCount) * 100).toLocaleString('pt-BR', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            });
+            const onTimePercent = ((onTimeCount / totalCount) * 100).toLocaleString('pt-BR', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            });
+            const delayedPercent = ((delayedCount / totalCount) * 100).toLocaleString('pt-BR', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            });
+
+            document.getElementById('early-percent').innerText = `${earlyPercent}% do total`;
+            document.getElementById('ontime-percent').innerText = `${onTimePercent}% do total`;
+            document.getElementById('delayed-percent').innerText = `${delayedPercent}% do total`;
+        }
+
+        // Initialize Radar Chart (static for now - machine occupation)
+        radarChart = new Chart(document.getElementById('radarMachineChart'), {
+            type: 'radar',
+            data: {
+                labels: ['Overloque', 'Reta', 'Cobertura', 'Manual', 'Catraca'],
+                datasets: [{
+                    label: '% Ocupação',
+                    data: [25, 39, 16, 18, 2],
+                    backgroundColor: 'rgba(53, 158, 255, 0.2)',
+                    borderColor: '#359EFF',
+                    pointBackgroundColor: '#359EFF',
+                    borderWidth: 3
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                scales: { r: { min: 0, max: 50, ticks: { display: false }, grid: { color: '#2d3748' }, angleLines: { color: '#2d3748' }, pointLabels: { font: { size: 10, weight: 'bold' } } } },
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        // Initial load and auto-refresh
+        fetchAnalytics();
+        setInterval(fetchAnalytics, 30000); // Refresh every 30 seconds
+
+        // Load OPs dynamically from API with improved UX
+        async function loadOPFilter() {
+            try {
+                const response = await fetch(`${API_URL}/products`);
+                const data = await response.json();
+                const products = data.products || [];
+
+                const select = document.getElementById('opFilter');
+
+                if (products.length === 0) {
+                    // Mensagem se não houver nenhuma OP no banco
+                    select.innerHTML = `<option value="">Sem OPs p/ Selecionar</option>`;
+                    select.disabled = true; // Desabilita se estiver vazio
+                } else {
+                    // Mensagem default inicial seguida das OPs reais
+                    let options = `<option value="">Selecionar OP</option>`;
+                    options += products.map(p =>
+                        `<option value="${p.pso_id}">OP #${p.product_reference} - ${p.product_description}</option>`
+                    ).join('');
+
+                    select.innerHTML = options;
+                    select.disabled = false;
+                }
+            } catch (error) {
+                console.error("Erro ao carregar OPs:", error);
+                // Em caso de falha técnica de rede, mantém a mensagem neutra
+                const select = document.getElementById('opFilter');
+                select.innerHTML = `<option value="">Sem OPs p/ Selecionar</option>`;
+            }
+        }
+
+        // Initialize OP filter
+        loadOPFilter();
+
+        // Handle OP filter change - update charts with selected OP data
+        function onOPFilterChange() {
+            const select = document.getElementById('opFilter');
+            const selectedPsoId = select.value;
+
+            if (!selectedPsoId) {
+                console.log('No OP selected');
+                return;
+            }
+
+            console.log(`OP selecionada: ${selectedPsoId}`);
+
+            // Fetch analytics for the selected OP
+            fetchAnalyticsForOP(selectedPsoId);
+        }
+
+        // Refresh dashboard manually
+        function refreshDashboard() {
+            const select = document.getElementById('opFilter');
+            const selectedPsoId = select.value;
+
+            if (selectedPsoId) {
+                fetchAnalyticsForOP(selectedPsoId);
+            } else {
+                fetchAnalytics(); // Fetch general analytics
+            }
+        }
+
+        // Fetch analytics for a specific OP
+        async function fetchAnalyticsForOP(psoId) {
+            try {
+                const response = await fetch(`${API_URL}/analytics/pso/${psoId}`);
+                const data = await response.json();
+
+                // Update charts with OP-specific data
+                updateChartsWithOPData(data);
+            } catch (error) {
+                console.error('Erro ao carregar analytics da OP:', error);
+                // Fallback to general analytics
+                fetchAnalytics();
+            }
+        }
+
+        // Update charts with OP-specific data
+        function updateChartsWithOPData(data) {
+            // Update production by hour chart
+            if (barChart && data.hourly_production) {
+                barChart.data.labels = data.hourly_production.map(h => `${h.hour}h`);
+                barChart.data.datasets[0].data = data.hourly_production.map(h => h.pieces);
+                barChart.update();
+            }
+
+            // Update efficiency metrics
+            if (data.efficiency) {
+                const efficiencyValue = document.getElementById('efficiency-value');
+                if (efficiencyValue) {
+                    efficiencyValue.textContent = `${data.efficiency.current}%`;
+                }
+            }
+
+            // Update pieces produced
+            if (data.production) {
+                const piecesValue = document.getElementById('pieces-value');
+                if (piecesValue) {
+                    piecesValue.innerHTML = `${data.production.current} <span class="text-gray-600 text-lg">/ ${data.production.target}</span>`;
+                }
+
+                const piecesProgress = document.getElementById('pieces-progress');
+                if (piecesProgress) {
+                    const percentage = ((data.production.current / data.production.target) * 100).toFixed(1);
+                    piecesProgress.textContent = `${percentage}% do total da Ordem`;
+                }
+            }
+
+            // Update delay rate donut chart
+            if (cartStatusChart && data.delay_rate) { // Changed donutChart to cartStatusChart
+                const early = data.delay_rate.early || 0;
+                const onTime = data.delay_rate.on_time || 0;
+                const delayed = data.delay_rate.delayed || 0;
+
+                cartStatusChart.data.datasets[0].data = [early, onTime, delayed];
+                cartStatusChart.update();
+            }
+        }
+    </script>
+</body>
+
+</html>

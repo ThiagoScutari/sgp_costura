@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGP Costura - Configurações</title>
+
+    <!-- Unified Theme & Layout -->
+    <link rel="stylesheet" href="../shared/theme.css">
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/layout.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .tab-active {
+            border-bottom: 4px solid #359EFF;
+            color: #359EFF;
+        }
+
+        .badge-owner {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .badge-user {
+            background-color: rgba(74, 222, 128, 0.1);
+            color: #4ade80;
+            border: 1px solid rgba(74, 222, 128, 0.2);
+        }
+
+        .badge-view {
+            background-color: rgba(156, 163, 175, 0.1);
+            color: #9ca3af;
+            border: 1px solid rgba(156, 163, 175, 0.2);
+        }
+    </style>
+</head>
+
+<body class="bg-[#0f1923] text-gray-200 min-h-screen flex flex-col">
+
+    <header class="bg-[#1b2227] border-b border-gray-800 p-6 sticky top-0 z-50">
+        <div class="max-w-5xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-blue-400">settings</span>
+                <h1 class="text-xl font-black uppercase tracking-tight">Configurações do Sistema</h1>
+            </div>
+            <button onclick="saveConfigurations()"
+                class="bg-[#359EFF] hover:bg-blue-600 text-white px-8 py-2 rounded-xl font-black shadow-lg shadow-blue-500/10 transition-all">
+                SALVAR ALTERAÇÕES
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-5xl w-full mx-auto p-6 space-y-8">
+
+        <div class="flex border-b border-gray-800">
+            <button onclick="switchTab('turnos')" id="btn-tab-turnos"
+                class="px-8 py-4 text-sm font-black uppercase tracking-widest tab-active transition-all flex items-center gap-2">
+                <span class="material-symbols-outlined text-lg">schedule</span>
+                Calendário de Turnos
+            </button>
+            <button onclick="switchTab('usuarios')" id="btn-tab-usuarios"
+                class="px-8 py-4 text-sm font-black uppercase tracking-widest text-gray-500 hover:text-white transition-all flex items-center gap-2">
+                <span class="material-symbols-outlined text-lg">group</span>
+                Gestão de Usuários
+            </button>
+        </div>
+
+        <section id="content-turnos" class="space-y-8 animate-in fade-in duration-500">
+            <div class="bg-[#1b2227] p-8 rounded-2xl border border-gray-800 space-y-6">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <span class="w-2 h-6 bg-blue-500 rounded-full"></span>
+                    Jornada de Trabalho
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="space-y-2">
+                        <label class="text-xs font-black uppercase text-gray-500 tracking-widest">Início do
+                            Turno</label>
+                        <input type="time" id="start-shift" value="07:00"
+                            class="w-full bg-gray-900 border border-gray-700 rounded-xl p-4 text-xl font-black text-white outline-none focus:border-blue-500 transition-all">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs font-black uppercase text-gray-500 tracking-widest">Fim do Turno</label>
+                        <input type="time" id="end-shift" value="17:00"
+                            class="w-full bg-gray-900 border border-gray-700 rounded-xl p-4 text-xl font-black text-white outline-none focus:border-blue-500 transition-all">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-[#1b2227] rounded-2xl border border-gray-800 overflow-hidden">
+                <div class="p-8 border-b border-gray-800 flex justify-between items-center">
+                    <h2 class="text-lg font-bold flex items-center gap-2">
+                        <span class="w-2 h-6 bg-yellow-500 rounded-full"></span>
+                        Intervalos e Pausas
+                    </h2>
+                    <button onclick="addInterval()"
+                        class="text-blue-400 font-bold flex items-center gap-2 hover:bg-blue-400/10 px-4 py-2 rounded-lg transition-all">
+                        <span class="material-symbols-outlined">add_circle</span>
+                        Adicionar Intervalo
+                    </button>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-gray-800/50 text-[10px] font-black uppercase text-gray-500">
+                        <tr>
+                            <th class="p-4">Nome do Intervalo</th>
+                            <th class="p-4">Início</th>
+                            <th class="p-4">Fim</th>
+                            <th class="p-4 text-right">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="intervals-table">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="content-usuarios" class="hidden space-y-8 animate-in fade-in duration-500">
+            <div class="bg-[#1b2227] rounded-2xl border border-gray-800 overflow-hidden">
+                <div class="p-8 border-b border-gray-800 flex justify-between items-center">
+                    <h2 class="text-lg font-bold flex items-center gap-2">
+                        <span class="w-2 h-6 bg-green-500 rounded-full"></span>
+                        Controle de Acesso (RBAC)
+                    </h2>
+                    <button
+                        class="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all">
+                        <span class="material-symbols-outlined text-sm">person_add</span>
+                        Novo Usuário
+                    </button>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-gray-800/50 text-[10px] font-black uppercase text-gray-500">
+                        <tr>
+                            <th class="p-4">Nome</th>
+                            <th class="p-4">E-mail</th>
+                            <th class="p-4">Nível de Acesso</th>
+                            <th class="p-4 text-right">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        let intervals = [
+            { nome: "Café Manhã", inicio: "09:00", fim: "09:15" },
+            { nome: "Almoço", inicio: "12:00", fim: "13:00" },
+            { nome: "Café Tarde", inicio: "15:30", fim: "15:45" }
+        ];
+
+        let users = [
+            { nome: "Thiago Scutari", email: "thiago@consultoria.com", role: "Owner" },
+            { nome: "Débora Modelagens", email: "debora@dr.com", role: "User" },
+            { nome: "Elizandra Facilitadora", email: "eliz@fabrica.com", role: "User" },
+            { nome: "Visitante Fábrica", email: "guest@teste.com", role: "View" }
+        ];
+
+        function switchTab(tab) {
+            const btnTurnos = document.getElementById('btn-tab-turnos');
+            const btnUsuarios = document.getElementById('btn-tab-usuarios');
+            const contentTurnos = document.getElementById('content-turnos');
+            const contentUsuarios = document.getElementById('content-usuarios');
+
+            if (tab === 'turnos') {
+                btnTurnos.classList.add('tab-active');
+                btnUsuarios.classList.remove('tab-active');
+                btnUsuarios.classList.add('text-gray-500');
+                contentTurnos.classList.remove('hidden');
+                contentUsuarios.classList.add('hidden');
+            } else {
+                btnUsuarios.classList.add('tab-active');
+                btnTurnos.classList.remove('tab-active');
+                btnTurnos.classList.add('text-gray-500');
+                contentUsuarios.classList.remove('hidden');
+                contentTurnos.classList.add('hidden');
+                renderUsers();
+            }
+        }
+
+        function renderIntervals() {
+            const tbody = document.getElementById('intervals-table');
+            tbody.innerHTML = intervals.map((int, index) => `
+                <tr class="border-b border-gray-800/50 hover:bg-gray-800/20 transition-colors">
+                    <td class="p-4 font-bold text-white">${int.nome}</td>
+                    <td class="p-4"><input type="time" value="${int.inicio}" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500"></td>
+                    <td class="p-4"><input type="time" value="${int.fim}" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500"></td>
+                    <td class="p-4 text-right">
+                        <button onclick="removeInterval(${index})" class="text-red-500/50 hover:text-red-500 transition-colors">
+                            <span class="material-symbols-outlined">delete</span>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderUsers() {
+            const tbody = document.getElementById('users-table');
+            tbody.innerHTML = users.map(u => `
+                <tr class="border-b border-gray-800/50 hover:bg-gray-800/20 transition-colors">
+                    <td class="p-4 font-bold text-white">${u.nome}</td>
+                    <td class="p-4 text-gray-500">${u.email}</td>
+                    <td class="p-4">
+                        <span class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${getRoleBadge(u.role)}">
+                            ${u.role}
+                        </span>
+                    </td>
+                    <td class="p-4 text-right">
+                        <button class="text-gray-600 hover:text-white transition-colors">
+                            <span class="material-symbols-outlined">edit</span>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function getRoleBadge(role) {
+            if (role === 'Owner') return 'badge-owner';
+            if (role === 'User') return 'badge-user';
+            return 'badge-view';
+        }
+
+        function removeInterval(index) {
+            intervals.splice(index, 1);
+            renderIntervals();
+        }
+
+        function saveConfigurations() {
+            const start = document.getElementById('start-shift').value;
+            const end = document.getElementById('end-shift').value;
+
+            // Validação Reativa
+            const invalid = intervals.some(i => i.inicio < start || i.fim > end);
+
+            if (invalid) {
+                alert("ERRO: Existem intervalos programados fora do horário da jornada de trabalho!");
+            } else {
+                alert("Configurações salvas com sucesso! O Dashboard será atualizado com os novos horários.");
+            }
+        }
+
+        window.onload = renderIntervals;
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,49 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph Refinamento_Tecnico["Manutenção da Sequencia Operacional"]
+        CreateV1["Criar PSO V1: Versão de Trabalho"]
+        ListOps["Listar Operações do PDF"]
+        EditOps{"Manutenção?"}
+        FlagInactive["Marcar como Inativa: Ocultar da Produção"]
+        InputTime["Inserir Tempo Editado: Valor Centesimal"]
+        MapMachine["Vincular Máquina Original -> Máquina Macro"]
+        UpdateList["Lista de Operações Atualizada"]
+        MoreEdits{"Deseja ajustar outra operação?"}
+  end
+ subgraph Calculos_VAC["Cálculos Automáticos"]
+        CalcFlow["Definir Fator de Eficiência Global: ex: 0.80"]
+        Formula["Cálculo: Tempo Final = Tempo Editado / Fator"]
+        SumTP["Somar Tempo Padrão Total da Peça - TP"]
+  end
+    CreateV1 --> ListOps
+    ListOps --> EditOps
+    EditOps -- Inativar --> FlagInactive
+    EditOps -- Ajustar Tempo --> InputTime
+    EditOps -- Vincular Máquina --> MapMachine
+    FlagInactive --> UpdateList
+    InputTime --> UpdateList
+    MapMachine --> UpdateList
+    UpdateList --> MoreEdits
+    MoreEdits -- Sim --> EditOps
+    CalcFlow --> Formula
+    Formula --> SumTP
+    Start(("Início: Importar PDF")) --> CheckProduct{"Produto já existe?"}
+    CheckProduct -- Sim --> AlertConflict["ALERTA: Sobrescrever Dados?"]
+    AlertConflict -- Confirmar --> DeleteOld["Hard Delete: Apagar versões e planejamentos antigos"]
+    DeleteOld --> CreateV0["Criar PSO V0: Extração Bruta/Backup"]
+    CheckProduct -- Não --> CreateV0
+    CreateV0 --> CreateV1
+    MoreEdits -- Não --> CalcFlow
+    SumTP --> Auditoria{"Revisão da Sequencia"}
+    Auditoria -- Reprovado --> EditOps
+    Auditoria -- Aprovado --> LockVersion["Salvar e Ativar PSO V1"]
+    LockVersion --> End(("Pronto para Ciclo 2: Gerar OP"))
+
+    style UpdateList fill:#e1f5fe,stroke:#01579b
+    style CalcFlow fill:#ffd,stroke:#333
+    style AlertConflict fill:#f66,stroke:#333,stroke-width:2px
+    style CreateV0 fill:#dfd,stroke:#333
+    style LockVersion fill:#9f9,stroke:#333,stroke-width:4px

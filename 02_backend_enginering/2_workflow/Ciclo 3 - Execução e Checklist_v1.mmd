@@ -1,0 +1,34 @@
+---
+config:
+  layout: dagre
+---
+flowchart TB
+ subgraph Processo_Costura["Chão de Fábrica"]
+        Work["Costureiras executam conforme o Card"]
+        Distribution["Carrinho entra na Célula com Card Físico"]
+        EndOfLine["Carrinho chega ao fim da pista"]
+  end
+ subgraph Validacao_e_Dashboard["Inteligência de Dados"]
+        SaveCheck["Registrar Conclusão (finished_at)"]
+        FacilitatorCheck{"Checklist Digital (Facilitadora)"}
+        CalcPerformance["Calcular: Tempo de Atravessamento vs 30 min"]
+        UpdateDash["Atualizar Dashboard: Meta vs. Real"]
+        CheckOP{"OP Concluída?"}
+  end
+    Start(("Início da Produção (Check-in OP)")) --> PrintCards["Gerar e Imprimir Cards de Apoio (A4 Econômico)"]
+    PrintCards --> Distribution
+    Distribution --> Work
+    Work --> EndOfLine
+    EndOfLine --> FacilitatorCheck
+    FacilitatorCheck -- Quantidade/Qualidade OK --> SaveCheck
+    SaveCheck --> CalcPerformance
+    CalcPerformance --> UpdateDash
+    UpdateDash --> CheckOP
+    CheckOP -- Não --> NextBatch["Aguardar Próximo Carrinho (Novo Ciclo 30 min)"]
+    NextBatch --> EndOfLine
+    CheckOP -- Sim --> CloseOP["Encerrar Ordem de Produção"]
+    CloseOP --> End(("Fim do Processo"))
+
+    style SaveCheck fill:#9f9,stroke:#333,stroke-width:4px
+    style FacilitatorCheck fill:#ffd,stroke:#333
+    style UpdateDash fill:#bbf,stroke:#333

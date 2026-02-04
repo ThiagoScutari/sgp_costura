@@ -1,0 +1,26 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+    A["Selecionar OP + 4 Costureiras"] --> B["Sistema fixa TL p/ 30 min"]
+    B --> C{"Arrastar Operação p/ Workstation ou Pré-Produção"}
+    C --> G{"Destino: Pré-Produção?"}
+    G -- Sim --> H["Alocar em Painel de Apoio - Fora do Pulso"]
+    G -- Não --> I["Validar Precedência de Fluxo - Dependency_id"]
+    I --> D{"Carga > 30 min?"}
+    D -- Sim --> E["Destaque Vermelho + Botão Fracionar"]
+    E --> Modal["Modal: Escolher Operação e Quantidade"]
+    Modal --> F["Transferir Saldo p/ Próxima Estação"]
+    D -- Não --> J{"Validar Máquina vs Skill"}
+    F --> J
+    J --> K["Atualizar Termômetro de Tempo da Estação"]
+    K --> L{"Todas as Ops Alocadas e Sem Gargalos?"}
+    L -- Não --> C
+    L -- Sim --> M["Gerar Plano de Produção e Roteiro de Carrinhos"]
+
+    style H fill:#bbf,stroke:#333
+    style E fill:#f66,stroke:#333
+    style Modal fill:#fff,stroke:#333,stroke-dasharray: 5 5
+    style L fill:#ffd,stroke:#333
+    style M fill:#9f9,stroke:#333,stroke-width:4px

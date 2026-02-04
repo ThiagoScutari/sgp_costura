@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGP Costura - Checklist Facilitadora</title>
+
+    <!-- Unified Theme & Layout -->
+    <link rel="stylesheet" href="../shared/theme.css">
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/layout.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .success-animate {
+            animation: successScale 0.4s ease-out;
+        }
+
+        @keyframes successScale {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+                background-color: #4ade80;
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        /* Estilo para simular o botão "armado" */
+        .btn-armed {
+            background-color: #166534 !important;
+            animation: pulse-green 1s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% {
+                box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+            }
+
+            70% {
+                box-shadow: 0 0 0 15px rgba(74, 222, 128, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-white text-black antialiased min-h-screen pb-24">
+
+    <header class="sticky top-0 z-50 bg-black text-white p-4 shadow-md">
+        <div class="max-w-md mx-auto flex justify-between items-center">
+            <div class="flex flex-col">
+                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">OP Ativa</span>
+                <h1 class="text-xl font-black">#2024-001</h1>
+            </div>
+            <div class="text-right">
+                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Referência</span>
+                <p class="font-bold">POLO PREMIUM</p>
+            </div>
+            <div class="bg-[#4CAF50] text-black px-3 py-1 rounded-lg">
+                <p class="text-xs font-black uppercase">Lote</p>
+                <p class="text-lg font-black leading-none">10 pç</p>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto p-4 space-y-6">
+
+        <section id="current-batch-section" class="space-y-3">
+            <div class="flex items-center gap-2 px-1">
+                <span class="relative flex h-3 w-3">
+                    <span
+                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                </span>
+                <h3 class="text-xs font-black uppercase tracking-widest text-gray-500">Aguardando Finalização</h3>
+            </div>
+
+            <div id="main-card"
+                class="bg-white border-4 border-black rounded-3xl p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-all">
+                <div class="text-center space-y-2 mb-8">
+                    <p class="text-sm font-bold text-gray-500 uppercase tracking-widest">Carrinho Atual</p>
+                    <h2 id="current-cart-label" class="text-6xl font-black tracking-tighter">#082</h2>
+                    <div class="inline-flex items-center gap-2 bg-gray-100 px-4 py-2 rounded-full">
+                        <span class="material-symbols-outlined text-sm">timer</span>
+                        <span id="current-timer" class="text-lg font-black font-mono">00:00:00</span>
+                    </div>
+                </div>
+
+                <button id="finish-btn" onclick="handleFinishClick()"
+                    class="w-full py-10 bg-[#4CAF50] text-white rounded-2xl flex flex-col items-center justify-center gap-2 transition-all active:scale-95">
+                    <span id="btn-icon" class="material-symbols-outlined text-6xl font-black">check_circle</span>
+                    <span id="btn-text" class="text-2xl font-black uppercase tracking-tight">Finalizar Lote</span>
+                    <p id="btn-hint" class="text-[10px] font-bold uppercase opacity-80">Clique duas vezes para confirmar
+                    </p>
+                </button>
+            </div>
+        </section>
+
+        <section class="space-y-3">
+            <h3 class="text-xs font-black uppercase tracking-widest text-gray-500 px-1">Sequência na Célula (Próximos)
+            </h3>
+            <div id="waiting-list" class="space-y-3">
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const API_URL = "http://localhost:8001/api";
+        let pendingBatches = [];
+        let clickState = 0;
+        let armedTimeout;
+        let timerInterval;
+
+        // Fetch Queue
+        async function loadQueue() {
+            try {
+                const response = await fetch(`${API_URL}/batches/pending`);
+                const data = await response.json();
+
+                if (data.batches) {
+                    pendingBatches = data.batches;
+                    updateUI();
+                }
+            } catch (error) {
+                console.error("Error loading queue:", error);
+            }
+        }
+
+        function updateUI() {
+            const currentSection = document.getElementById('current-batch-section');
+            const mainCard = document.getElementById('main-card');
+
+            if (pendingBatches.length === 0) {
+                // Empty State
+                document.getElementById('current-cart-label').innerText = "---";
+                document.getElementById('current-timer').innerText = "--:--:--";
+                document.getElementById('waiting-list').innerHTML = '<p class="text-center text-gray-400 font-bold p-4">Não há lotes pendentes na fila.</p>';
+
+                // Disable button
+                const btn = document.getElementById('finish-btn');
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.onclick = null;
+                return;
+            }
+
+            const current = pendingBatches[0];
+            document.getElementById('current-cart-label').innerText = `#${current.id}`;
+
+            // Re-enable button
+            const btn = document.getElementById('finish-btn');
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            btn.onclick = handleFinishClick;
+
+            renderWaitingList();
+        }
+
+        function updateTimers() {
+            // Only purely visual timer since we dont fetch start time for every polling yet
+            // Just incrementing purely for feeling alive or potentially we could calculate if we fetched start time
+            // For now, keeping it simple: just show current time or 00:00:00
+            // The previous logic was incrementing from 0 locally. Let's keep a local counter for the current active view.
+        }
+
+        function handleFinishClick() {
+            const btn = document.getElementById('finish-btn');
+            const btnText = document.getElementById('btn-text');
+            const btnHint = document.getElementById('btn-hint');
+
+            if (clickState === 0) {
+                // Armar
+                clickState = 1;
+                btn.classList.add('btn-armed');
+                btnText.innerText = "Confirmar?";
+                btnHint.innerText = "Clique novamente para validar";
+
+                armedTimeout = setTimeout(() => {
+                    resetButton();
+                }, 3000);
+            } else {
+                // Confirmar
+                clearTimeout(armedTimeout);
+                executeFinish();
+            }
+        }
+
+        function resetButton() {
+            clickState = 0;
+            const btn = document.getElementById('finish-btn');
+            btn.classList.remove('btn-armed');
+            document.getElementById('btn-text').innerText = "Finalizar Lote";
+            document.getElementById('btn-hint').innerText = "Clique duas vezes para confirmar";
+        }
+
+        async function executeFinish() {
+            if (pendingBatches.length === 0) return;
+
+            const currentBatch = pendingBatches[0];
+            const card = document.getElementById('main-card');
+            card.classList.add('success-animate');
+
+            try {
+                const response = await fetch(`${API_URL}/batches/checkout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_id: currentBatch.id })
+                });
+
+                if (response.ok) {
+                    // Success feedback
+                    setTimeout(() => {
+                        card.classList.remove('success-animate');
+                        resetButton();
+                        loadQueue(); // Refresh to get next
+                    }, 500);
+                } else {
+                    alert("Erro ao finalizar lote no servidor.");
+                    card.classList.remove('success-animate');
+                    resetButton();
+                }
+            } catch (error) {
+                console.error(error);
+                alert("Erro de conexão.");
+                card.classList.remove('success-animate');
+                resetButton();
+            }
+        }
+
+        function renderWaitingList() {
+            const list = document.getElementById('waiting-list');
+            // Show next 3 items
+            const nextBatches = pendingBatches.slice(1, 4);
+
+            list.innerHTML = nextBatches.map(c => `
+                <div class="flex items-center justify-between p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl opacity-60">
+                    <div class="flex flex-col">
+                        <span class="text-[10px] font-black uppercase text-gray-400 leading-none">Carrinho</span>
+                        <span class="text-xl font-black">#${c.id}</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-gray-400">
+                        <span class="material-symbols-outlined text-sm">hourglass_empty</span>
+                        <span class="text-xs font-bold uppercase tracking-tighter">Na fila</span>
+                    </div>
+                </div>
+            `).join('');
+
+            if (pendingBatches.length > 4) {
+                list.innerHTML += `<p class="text-center text-xs text-gray-400 font-bold mt-2">+ mais ${pendingBatches.length - 4} lotes</p>`;
+            }
+        }
+
+        // Init
+        loadQueue();
+        setInterval(loadQueue, 5000); // Poll every 5s logic
+
+    </script>
+</body>
+
+</html>
