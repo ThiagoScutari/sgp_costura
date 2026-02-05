@@ -879,13 +879,15 @@ def get_published_plannings(db: Session = Depends(get_db)):
         plannings = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.production_order_id == po.id).all()
         for planning in plannings:
             pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
-            # SE A PSO ESTIVER ARQUIVADA, ELA NÃO PODE IR PARA A TELA 01
-            if pso and not pso.is_archived:
-                versions.append({
-                    "planning_id": planning.id,
-                    "version_name": planning.version_name,
-                    "batch_size": planning.batch_size
-                })
+            if not pso:
+                continue
+            if pso and pso.is_archived:
+                continue
+            versions.append({
+                "planning_id": planning.id,
+                "version_name": planning.version_name,
+                "batch_size": planning.batch_size
+            })
         if versions:
             ops.append({"product_reference": po.product_reference, "versions": versions})
     return {"ops": ops}
