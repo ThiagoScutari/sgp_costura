@@ -872,18 +872,14 @@ def get_planning_allocations(planning_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/planning/published")
 def get_published_plannings(db: Session = Depends(get_db)):
-    # Busca ordens vinculadas a planejamentos
     orders = db.query(models.ProductionOrder).join(models.ProductionPlanning).distinct().all()
     ops = []
     for po in orders:
         versions = []
-        # Busca planejamentos e valida a PSO de cada um
-        plannings = db.query(models.ProductionPlanning).filter(
-            models.ProductionPlanning.production_order_id == po.id
-        ).all()
-        for planning in reversed(plannings):
+        plannings = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.production_order_id == po.id).all()
+        for planning in plannings:
             pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
-            # FILTRO DEFINITIVO: Se arquivado, não entra no Monitor
+            # SE A PSO ESTIVER ARQUIVADA, ELA NÃO PODE IR PARA A TELA 01
             if pso and not pso.is_archived:
                 versions.append({
                     "planning_id": planning.id,
