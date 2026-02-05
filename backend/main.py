@@ -872,102 +872,27 @@ def get_planning_allocations(planning_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/planning/published")
 def get_published_plannings(db: Session = Depends(get_db)):
-    """
-    Get all products that have published balancing plans.
-    Used when clicking CARREGAR button.
-    """
-    try:
-        # Get all production orders that have plannings
-        orders_with_planning = db.query(models.ProductionOrder).join(
-            models.ProductionPlanning,
-            models.ProductionOrder.id == models.ProductionPlanning.production_order_id
-        ).distinct().all()
-        
-        print(f"📊 Found {len(orders_with_planning)} production orders with plannings")
-        
-        ops = []
-        for po in orders_with_planning:
-            try:
-                # Get all plannings for this PO
-                plannings = db.query(models.ProductionPlanning).filter(
-                    models.ProductionPlanning.production_order_id == po.id
-                ).order_by(desc(models.ProductionPlanning.created_at)).all()
-                
-                if not plannings:
-                    continue
-                
-                versions = []
-                # Iterate reversed to show version numbers correctly if derived from index? 
-                # Actually, filtering might break index-based numbering if we want them continuous, 
-                # but usually version # is fixed. Let's stick to simple list building.
-                # User's snippet iterates simply. Code uses reversed(plannings) for numbering.
-                
-                # Let's verify each planning
-                for idx, planning in enumerate(reversed(plannings)):
-                    # Get PSO for this planning
-                    pso_id = planning.pso_id
-                    pso = None
-                    if pso_id:
-                        pso = db.query(models.PSO).filter(models.PSO.id == pso_id).first()
-                    
-                    # Fallback logic if needed (borrowed from original code if pso_id is missing)
-                    if not pso:
-                         pso = db.query(models.PSO).join(models.Product).filter(
-                            models.Product.reference == po.product_reference
-                        ).order_by(desc(models.PSO.id)).first()
-
-                    # --- CRITICAL CHECK: SKIP ARCHIVED PSOS ---
-                    if not pso or pso.is_archived:
-                        continue 
-                    # ------------------------------------------
-
-                    seamstress_count = db.query(models.WorkstationAllocation.seamstress_id).filter(
-                        models.WorkstationAllocation.planning_id == planning.id
-                    ).distinct().count()
-                    
-                    versions.append({
-                        "planning_id": planning.id,
-                        "pso_id": pso.id,
-                        "version_number": idx + 1, # Keep original index or make it filtered index? 
-                        # Keeping original index (idx+1) helps trace back to total count, but filtered might be better. 
-                        # Let's keep it simple.
-                        "version_name": planning.version_name,
-                        "notes": planning.notes,
-                        "created_at": planning.created_at.isoformat() if planning.created_at else None,
-                        "seamstress_count": seamstress_count,
-                        "batch_size": planning.batch_size,
-                        "pulse_duration": planning.pulse_duration
-                    })
-                
-                # Only add OP if it has valid versions
-                if versions:
-                    # Sort versions by newest first (since we appended in reverse/oldest order above? 
-                    # Original code: reversed(plannings) -> enumerate -> reversed(result). 
-                    # Wait, original enumerate(reversed(plannings)) means oldest first in loop. 
-                    # Then it returns list(reversed(versions)).
-                    # So versions list here is Oldest -> Newest.
-                    # We should return Newest -> Oldest.
-                    
-                    ops.append({
-                        "pso_id": versions[-1]["pso_id"], # Use the latest valid PSO for card info
-                        "product_reference": po.product_reference,
-                        "product_description": pso.product.description if pso and pso.product else "N/A", # Use last checks pso
-                        "version_count": len(versions),
-                        "versions": list(reversed(versions))
-                    })
-
-            except Exception as po_error:
-                print(f"❌ Error processing PO {po.id}: {po_error}")
-                continue
-        
-        print(f"✅ Returning {len(ops)} OPs with plannings")
-        return {"ops": ops}
-        
-    except Exception as e:
-        print(f"❌ Error getting published plannings: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    # Busca ordens vinculadas a planejamentos
+    orders = db.query(models.ProductionOrder).join(models.ProductionPlanning).distinct().all()
+    ops = []
+    for po in orders:
+        versions = []
+        # Busca planejamentos e valida a PSO de cada um
+        plannings = db.query(models.ProductionPlanning).filter(
+            models.ProductionPlanning.production_order_id == po.id
+        ).all()
+        for planning in reversed(plannings):
+            pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
+            # FILTRO DEFINITIVO: Se arquivado, não entra no Monitor
+            if pso and not pso.is_archived:
+                versions.append({
+                    "planning_id": planning.id,
+                    "version_name": planning.version_name,
+                    "batch_size": planning.batch_size
+                })
+        if versions:
+            ops.append({"product_reference": po.product_reference, "versions": versions})
+    return {"ops": ops}
 
 
 @app.get("/api/planning/{planning_id}")
@@ -2159,55 +2084,4 @@ def health_check():
 
 
 
-# --- CORREÇÃO OBRIGATÓRIA SPRINT 13 ---
-@app.get("/api/dashboard/active-status")
-def get_active_status(db: Session = Depends(get_db)):
-    """
-    Returns real-time status of the active planning session.
-    Used by Monitor (Tela 01) to show live efficiency.
-    """
-    planning = db.query(models.ProductionPlanning).filter(
-        models.ProductionPlanning.is_active == True
-    ).order_by(desc(models.ProductionPlanning.id)).first()
 
-    if not planning:
-        return {"status": "inactive", "efficiency": 0, "worked_minutes": 0}
-
-    # Identify start time (first event or planning creation)
-    start_event = db.query(models.ProductionEvent).filter(
-        models.ProductionEvent.planning_id == planning.id,
-        models.ProductionEvent.event_type == 'start'
-    ).order_by(models.ProductionEvent.created_at).first()
-    
-    session_start_time = start_event.created_at if start_event else planning.created_at
-    current_time = datetime.utcnow()
-
-    # --- CÁLCULO DE PAUSAS REAIS (DB) ---
-    config = get_shift_config(db)
-    try:
-        # Usa a função inteligente que desconta TODOS os intervalos do banco
-        worked_minutes = calculate_working_minutes_with_pauses(
-            db, 
-            planning.id, 
-            session_start_time, 
-            current_time
-        )
-    except Exception as e:
-        print(f"Erro no cálculo de pausas: {e}")
-        worked_minutes = (current_time - session_start_time).total_seconds() / 60
-    # ---------------------------------------
-
-    # Calculate standard time produced
-    completed_trackings = db.query(models.BatchTracking).filter(
-        models.BatchTracking.planning_id == planning.id
-    ).all()
-    
-    produced_batches = len(completed_trackings)
-    
-    return {
-        "status": "active",
-        "planning_id": planning.id,
-        "start_time": session_start_time,
-        "worked_minutes": round(worked_minutes, 2),
-        "produced_batches": produced_batches
-    }
