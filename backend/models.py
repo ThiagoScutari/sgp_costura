@@ -17,6 +17,9 @@ class PSO(Base):
     version_name = Column(String)
     status = Column(String, default="Ativa")
     default_efficiency_factor = Column(Float, default=1.0)
+    
+    # Sprint 14: Soft Delete
+    is_archived = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     product = relationship("Product", back_populates="psos")
     operations = relationship("Operation", back_populates="pso")

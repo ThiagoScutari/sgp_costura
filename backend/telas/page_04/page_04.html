@@ -577,11 +577,26 @@
 
                 // Then apply the allocations
                 state.pulseDuration = data.pulse_duration;
-                state.tl = data.batch_size;
+
+                // --- SPRINT 14.1: CAPACITY CHECK (STRICT ENFORCEMENT) ---
+                if (data.capacity_warning && data.recalculated_batch_size) {
+                    console.log("⚠️ Capacidade reduzida! Forçando novo TL:", data.recalculated_batch_size);
+
+                    // Alert User
+                    alert(`🚨 ATENÇÃO: Capacidade reduzida detectada (${data.active_operators_current} costureiras). \n` +
+                        `O lote foi ajustado de ${data.batch_size} para ${data.recalculated_batch_size} para evitar gargalos.\n\n` +
+                        `Motivo: O plano original foi criado com ${data.original_operators} costureiras.`);
+
+                    // FORCE OVERRIDE
+                    state.tl = data.recalculated_batch_size;
+                } else {
+                    state.tl = data.batch_size;
+                }
+                // -------------------------------------------------------
 
                 // Update UI
                 document.getElementById('pulse-select').value = data.pulse_duration;
-                document.getElementById('tl-display').innerText = data.batch_size;
+                document.getElementById('tl-display').innerText = state.tl;
 
                 // Clear all workstations first
                 state.activeSeamstresses.forEach((_, i) => {

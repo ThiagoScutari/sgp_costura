@@ -81,7 +81,12 @@
                 <span class="text-gray-500">|</span>
                 <span class="text-sm font-bold text-gray-400 uppercase tracking-wide">Gestão de Produtos</span>
             </div>
-            <div>
+            <div class="flex gap-3">
+                <button onclick="openArchivedModal()"
+                    class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 transition-all shadow-lg">
+                    <span class="material-symbols-outlined text-lg">archive</span>
+                    ARQUIVADAS
+                </button>
                 <input type="file" id="pdf-file-input" accept=".pdf" class="hidden" onchange="handleFileSelect(event)">
                 <button onclick="document.getElementById('pdf-file-input').click()"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 transition-all shadow-lg">
@@ -112,6 +117,7 @@
 
     <!-- Modal for Operation Details with Drag & Drop -->
     <div id="details-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <!-- ... (details modal content) -->
         <div class="bg-[#1b2227] rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden border border-gray-800">
             <div class="p-6 border-b border-gray-800 flex justify-between items-center">
                 <div>
@@ -160,8 +166,8 @@
                     <div class="flex gap-2">
                         <button onclick="deletePSOVersion()"
                             class="bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-lg font-black flex items-center gap-2 shadow-lg transition-all">
-                            <span class="material-symbols-outlined font-bold">delete</span>
-                            EXCLUIR VERSÃO
+                            <span class="material-symbols-outlined font-bold">archive</span>
+                            ARQUIVAR VERSÃO
                         </button>
                         <button onclick="goToBalance()"
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg font-black flex items-center gap-2 shadow-lg transition-all">
@@ -175,6 +181,35 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Arquivadas (Sprint 14) -->
+    <div id="archived-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div class="bg-[#1b2227] rounded-2xl max-w-4xl w-full border border-gray-800">
+            <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                <h3 class="text-xl font-black text-white">PSOs Arquivadas</h3>
+                <button onclick="document.getElementById('archived-modal').classList.add('hidden')"
+                    class="text-gray-400 hover:text-white">
+                    <span class="material-symbols-outlined text-3xl">close</span>
+                </button>
+            </div>
+            <div class="p-6">
+                <table class="w-full text-left text-sm text-gray-400">
+                    <thead class="uppercase bg-gray-800/50 text-xs text-gray-300">
+                        <tr>
+                            <th class="p-3">Produto</th>
+                            <th class="p-3">Versão</th>
+                            <th class="p-3 text-center">Operações</th>
+                            <th class="p-3 text-right">Data Arq.</th>
+                            <th class="p-3 text-right">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="archived-list-body">
+                        <!-- Populated via JS -->
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -524,11 +559,11 @@
 
         async function deletePSOVersion() {
             if (!currentPsoData || !currentPsoData.pso_id) {
-                alert('❌ Erro: Nenhuma versão selecionada para excluir.');
+                alert('❌ Erro: Nenhuma versão selecionada.');
                 return;
             }
 
-            if (!confirm(`⚠️ ATENÇÃO: Deseja realmente excluir a versão "${currentPsoData.current_version}"?\n\nEssa ação é irreversível e excluirá todas as operações vinculadas.`)) {
+            if (!confirm(`⚠️ ARQUIVAR VERSÃO?\n\nA versão "${currentPsoData.current_version}" será removida da lista principal, mas poderá ser restaurada depois.\n\nConfirma o arquivamento?`)) {
                 return;
             }
 
@@ -537,28 +572,86 @@
 
             try {
                 deleteBtn.disabled = true;
-                deleteBtn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span> EXCLUINDO...';
+                deleteBtn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">progress_activity</span> ARQUIVANDO...';
 
-                const response = await fetch(`${API_URL}/pso/${currentPsoData.pso_id}`, {
-                    method: 'DELETE'
+                // Sprint 14: Soft Delete (Archive)
+                const response = await fetch(`${API_URL}/pso/${currentPsoData.pso_id}/archive`, {
+                    method: 'PUT'
                 });
 
                 if (response.ok) {
-                    alert(`✅ Versão excluída com sucesso!`);
+                    alert(`✅ Versão arquivada com sucesso!`);
                     closeModal();
                     await loadProducts();
                 } else {
                     const error = await response.json();
-                    alert(`❌ Erro ao excluir versão:\n${error.detail || 'Erro desconhecido'}`);
+                    alert(`❌ Erro ao arquivar:\n${error.detail || 'Erro desconhecido'}`);
                 }
             } catch (error) {
-                console.error("Delete error:", error);
-                alert(`❌ Erro de conexão ao excluir versão:\n${error.message}`);
+                console.error("Archive error:", error);
+                alert(`❌ Erro de conexão:\n${error.message}`);
             } finally {
                 if (deleteBtn) {
                     deleteBtn.disabled = false;
                     deleteBtn.innerHTML = originalText;
                 }
+            }
+        }
+
+        // ================= SPRINT 14: ARCHIVE MANAGEMENT =================
+
+        async function openArchivedModal() {
+            document.getElementById('archived-modal').classList.remove('hidden');
+            await loadArchivedPSOs();
+        }
+
+        async function loadArchivedPSOs() {
+            const tbody = document.getElementById('archived-list-body');
+            tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center">Carregando...</td></tr>';
+
+            try {
+                const response = await fetch(`${API_URL}/pso/archived`);
+                const data = await response.json();
+
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center italic text-gray-500">Nenhum item arquivado.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.map(pso => `
+                    <tr class="border-b border-gray-700 hover:bg-white/5 transition-colors">
+                        <td class="p-3 font-bold text-white">${pso.product_reference}</td>
+                        <td class="p-3"><span class="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-bold">${pso.version_name}</span></td>
+                        <td class="p-3 text-center text-gray-400 font-mono">${pso.operations_count}</td>
+                        <td class="p-3 text-right text-xs text-gray-500">${new Date(pso.archived_at).toLocaleDateString()}</td>
+                        <td class="p-3 text-right">
+                            <button onclick="restorePSO(${pso.pso_id})" class="text-green-500 hover:text-white font-black text-xs uppercase flex items-center justify-end gap-1">
+                                <span class="material-symbols-outlined text-sm">restore_from_trash</span> RESTAURAR
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+
+            } catch (error) {
+                console.error("Error loading archived:", error);
+                tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Erro ao carregar lista.</td></tr>';
+            }
+        }
+
+        async function restorePSO(id) {
+            if (!confirm("Restaurar esta versão para a lista principal?")) return;
+
+            try {
+                const res = await fetch(`${API_URL}/pso/${id}/restore`, { method: 'PUT' });
+                if (res.ok) {
+                    alert("✅ Restaurado com sucesso!");
+                    await loadArchivedPSOs(); // Refresh modal
+                    await loadProducts();     // Refresh main list
+                } else {
+                    alert("Erro ao restaurar.");
+                }
+            } catch (e) {
+                alert("Erro de conexão: " + e.message);
             }
         }
 

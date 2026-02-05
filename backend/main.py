@@ -479,7 +479,10 @@ def get_products(db: Session = Depends(get_db)):
     
     result = []
     for product in products:
-        for pso in product.psos:
+        # Filter PSOs: Exclude archived
+        active_psos = [p for p in product.psos if not p.is_archived]
+        
+        for pso in active_psos:
             # Calculate total TP (sum of all operation times)
             operations = db.query(models.Operation).filter(models.Operation.pso_id == pso.id).all()
             # Check if this PSO has an active planning
@@ -891,42 +894,43 @@ def get_published_plannings(db: Session = Depends(get_db)):
                 ).order_by(desc(models.ProductionPlanning.created_at)).all()
                 
                 if not plannings:
-                    print(f"⚠️ No plannings found for PO {po.id}")
-                    continue
-                
-                print(f"📋 PO {po.id} has {len(plannings)} plannings")
-                
-                # Group plannings by PSO to show under each PSO version
-                # For the OP card, use the PSO from the first/most recent planning
-                first_planning = plannings[0]
-                main_pso = None
-                
-                if first_planning.pso_id:
-                    main_pso = db.query(models.PSO).filter(models.PSO.id == first_planning.pso_id).first()
-                
-                # Fallback: if no pso_id, get latest PSO for product
-                if not main_pso:
-                    main_pso = db.query(models.PSO).join(models.Product).filter(
-                        models.Product.reference == po.product_reference
-                    ).order_by(desc(models.PSO.id)).first()
-                
-                if not main_pso:
-                    print(f"⚠️ No PSO found for PO {po.id}")
                     continue
                 
                 versions = []
+                # Iterate reversed to show version numbers correctly if derived from index? 
+                # Actually, filtering might break index-based numbering if we want them continuous, 
+                # but usually version # is fixed. Let's stick to simple list building.
+                # User's snippet iterates simply. Code uses reversed(plannings) for numbering.
+                
+                # Let's verify each planning
                 for idx, planning in enumerate(reversed(plannings)):
+                    # Get PSO for this planning
+                    pso_id = planning.pso_id
+                    pso = None
+                    if pso_id:
+                        pso = db.query(models.PSO).filter(models.PSO.id == pso_id).first()
+                    
+                    # Fallback logic if needed (borrowed from original code if pso_id is missing)
+                    if not pso:
+                         pso = db.query(models.PSO).join(models.Product).filter(
+                            models.Product.reference == po.product_reference
+                        ).order_by(desc(models.PSO.id)).first()
+
+                    # --- CRITICAL CHECK: SKIP ARCHIVED PSOS ---
+                    if not pso or pso.is_archived:
+                        continue 
+                    # ------------------------------------------
+
                     seamstress_count = db.query(models.WorkstationAllocation.seamstress_id).filter(
                         models.WorkstationAllocation.planning_id == planning.id
                     ).distinct().count()
                     
-                    # ✅ Get the PSO that was used in THIS specific planning
-                    version_pso_id = planning.pso_id if planning.pso_id else main_pso.id
-                    
                     versions.append({
                         "planning_id": planning.id,
-                        "pso_id": version_pso_id,  # ✅ ADDED: Each version has its own pso_id
-                        "version_number": idx + 1,
+                        "pso_id": pso.id,
+                        "version_number": idx + 1, # Keep original index or make it filtered index? 
+                        # Keeping original index (idx+1) helps trace back to total count, but filtered might be better. 
+                        # Let's keep it simple.
                         "version_name": planning.version_name,
                         "notes": planning.notes,
                         "created_at": planning.created_at.isoformat() if planning.created_at else None,
@@ -935,13 +939,23 @@ def get_published_plannings(db: Session = Depends(get_db)):
                         "pulse_duration": planning.pulse_duration
                     })
                 
-                ops.append({
-                    "pso_id": main_pso.id,  # Main PSO for the card header
-                    "product_reference": main_pso.product.reference,
-                    "product_description": main_pso.product.description,
-                    "version_count": len(versions),
-                    "versions": list(reversed(versions))  # Newest first
-                })
+                # Only add OP if it has valid versions
+                if versions:
+                    # Sort versions by newest first (since we appended in reverse/oldest order above? 
+                    # Original code: reversed(plannings) -> enumerate -> reversed(result). 
+                    # Wait, original enumerate(reversed(plannings)) means oldest first in loop. 
+                    # Then it returns list(reversed(versions)).
+                    # So versions list here is Oldest -> Newest.
+                    # We should return Newest -> Oldest.
+                    
+                    ops.append({
+                        "pso_id": versions[-1]["pso_id"], # Use the latest valid PSO for card info
+                        "product_reference": po.product_reference,
+                        "product_description": pso.product.description if pso and pso.product else "N/A", # Use last checks pso
+                        "version_count": len(versions),
+                        "versions": list(reversed(versions))
+                    })
+
             except Exception as po_error:
                 print(f"❌ Error processing PO {po.id}: {po_error}")
                 continue
@@ -1017,6 +1031,30 @@ def get_planning_detail(planning_id: int, db: Session = Depends(get_db)):
                     "quantity": op_alloc.executed_quantity,
                     "is_fraction": op_alloc.is_fractioned
                 })
+
+        # --- SPRINT 14.1: CAPACITY RECALCULATION VALIDATION ---
+        
+        # 1. Count CURRENT active seamstresses
+        active_ops_count = db.query(models.Seamstress).filter(models.Seamstress.is_active == True).count()
+        
+        # 2. Get ORIGINAL operators count (fallback to allocation count if field is missing/zero)
+        original_ops_count = planning.total_operators
+        if not original_ops_count or original_ops_count == 0:
+             # Fallback: Count unique seamstresses in the saved plan
+             original_ops_count = len({alloc["seamstress_id"] for alloc in allocations}) or 1
+
+        recalculated_batch_size = None
+        capacity_warning = False
+        
+        # 3. Detect Capacity Drop
+        # Only recalculate if we have FEWER operators than before
+        if active_ops_count < original_ops_count and active_ops_count > 0:
+            capacity_factor = active_ops_count / original_ops_count
+            suggested_tl = math.floor(planning.batch_size * capacity_factor)
+            recalculated_batch_size = max(1, suggested_tl) # Ensure at least 1
+            capacity_warning = True
+            
+            print(f"⚠️ CAPACITY DROP: {original_ops_count} -> {active_ops_count}. Recalculating TL: {planning.batch_size} -> {recalculated_batch_size}")
         
         return {
             "planning_id": planning.id,
@@ -1027,7 +1065,12 @@ def get_planning_detail(planning_id: int, db: Session = Depends(get_db)):
             "pulse_duration": planning.pulse_duration,
             "batch_size": planning.batch_size,
             "created_at": planning.created_at.isoformat() if planning.created_at else None,
-            "allocations": allocations
+            "allocations": allocations,
+            # New fields for frontend guardrails
+            "active_operators_current": active_ops_count,
+            "original_operators": original_ops_count,
+            "recalculated_batch_size": recalculated_batch_size,
+            "capacity_warning": capacity_warning
         }
         
     except HTTPException:
@@ -1628,6 +1671,7 @@ async def save_pso_version(payload: dict, db: Session = Depends(get_db)):
 def delete_pso_version(pso_id: int, db: Session = Depends(get_db)):
     """
     Exclui uma versão específica de PSO e todas as suas operações vinculadas.
+    Legacy: Should be replaced by Archive in frontend for safety.
     """
     # 1. Busca a versão no banco
     pso_version = db.query(models.PSO).filter(models.PSO.id == pso_id).first()
@@ -1639,24 +1683,60 @@ def delete_pso_version(pso_id: int, db: Session = Depends(get_db)):
         )
 
     try:
-        # 2. Exclui as operações vinculadas primeiro (evita erro de chave estrangeira)
+        # HARD DELETE
         db.query(models.Operation).filter(models.Operation.pso_id == pso_id).delete()
-        
-        # 3. Exclui a versão do PSO
         db.delete(pso_version)
-        
-        # 4. Confirma a transação
         db.commit()
-        
         return {"message": f"Versão '{pso_version.version_name}' excluída com sucesso."}
         
     except Exception as e:
         db.rollback()
-        print(f"Erro ao excluir versão: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro interno ao excluir a versão do banco de dados."
-        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ================= Sprint 14: Soft Delete Endpoints =================
+
+@app.put("/api/pso/{pso_id}/archive")
+def archive_pso(pso_id: int, db: Session = Depends(get_db)):
+    """Soft delete a PSO"""
+    pso = db.query(models.PSO).filter(models.PSO.id == pso_id).first()
+    if not pso:
+        raise HTTPException(404, "PSO not found")
+        
+    pso.is_archived = True
+    pso.status = "Arquivada"
+    db.commit()
+    return {"message": "PSO arquivada com sucesso"}
+
+@app.put("/api/pso/{pso_id}/restore")
+def restore_pso(pso_id: int, db: Session = Depends(get_db)):
+    """Restore an archived PSO"""
+    pso = db.query(models.PSO).filter(models.PSO.id == pso_id).first()
+    if not pso:
+        raise HTTPException(404, "PSO not found")
+        
+    pso.is_archived = False
+    pso.status = "Ativa"
+    db.commit()
+    return {"message": "PSO restaurada com sucesso"}
+
+@app.get("/api/pso/archived")
+def get_archived_psos(db: Session = Depends(get_db)):
+    """List all archived PSOs"""
+    psos = db.query(models.PSO).filter(models.PSO.is_archived == True).all()
+    
+    result = []
+    for pso in psos:
+        operations = db.query(models.Operation).filter(models.Operation.pso_id == pso.id).all()
+        result.append({
+            "pso_id": pso.id,
+            "product_reference": pso.product.reference if pso.product else "N/A",
+            "version_name": pso.version_name,
+            "archived_at": pso.created_at, # Using created_at for sorting basically
+            "operations_count": len(operations)
+        })
+    return result
+
+
 
 @app.post("/api/batches/checkout", status_code=status.HTTP_201_CREATED)
 def checkout_batch(item: CheckoutRequest, db: Session = Depends(get_db)):
