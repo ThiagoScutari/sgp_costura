@@ -12,6 +12,12 @@ from database import engine, get_db, Base
 import models
 import extractor
 import math
+import logging
+
+cart_logger = logging.getLogger("cart_lote")
+if not cart_logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+cart_logger.setLevel(logging.INFO)
 
 # Re-create database tables (Note: In production this should be a migration)
 # We drop all to apply schema changes effectively for dev/sprint 0
@@ -654,6 +660,7 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
     Saves the current state of Kanban board.
     Creates a new ProductionPlanning version or updates existing active one.
     """
+    cart_logger.info("[SYNC:start] pso_id=%s batch_size=%s total_quantity=%s allocations=%s", data.pso_id, data.batch_size, data.total_quantity, len(data.allocations))
     try:
         # 1. Validate PSO
         pso = db.query(models.PSO).filter(models.PSO.id == data.pso_id).first()
@@ -684,18 +691,32 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
             models.ProductionPlanning.production_order_id == po.id
         ).update({"is_active": False})
         
+        batch_size_val = data.batch_size if data.batch_size and data.batch_size > 0 else 50
+        total_qty = data.total_quantity if data.total_quantity and data.total_quantity > 0 else 1000
+        
         new_planning = models.ProductionPlanning(
             production_order_id=po.id,
             pso_id=data.pso_id,  # ✅ Save which PSO version was used
             version_name=data.version_name or f"Plan-{datetime.utcnow().strftime('%Y%m%d-%H%M')}",
             pulse_duration=data.pulse_duration or po.pulse_duration,
-            batch_size=data.batch_size,
+            batch_size=batch_size_val,
+            total_quantity=total_qty,
             notes=data.notes,
             total_operators=len({a.workstation_id for a in data.allocations if a.workstation_id is not None}),
             is_active=False  # ✅ Default to inactive. Must be started manually in Monitor (Page 01)
         )
         db.add(new_planning)
         db.flush()
+        print(f"[SYNC] Created planning id={new_planning.id} batch_size={batch_size_val} total_qty={total_qty} po_id={po.id}")
+
+        # Ensure total_quantity and batch_size persist on the ProductionOrder for analytics/history
+        if total_qty:
+            po.quantity = total_qty
+        if new_planning.pulse_duration:
+            po.pulse_duration = new_planning.pulse_duration
+        db.add(po)
+        db.flush()
+        print(f"[SYNC] PO {po.id} updated quantity={po.quantity} pulse={po.pulse_duration}")
 
         # 4. Process Allocations
         # Group allocations by workstation to create WorkstationAllocation first
@@ -749,10 +770,8 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
         db.flush()
 
         # Generate new batches based on total quantity and batch size
-        total_qty = data.total_quantity if data.total_quantity and data.total_quantity > 0 else 1000
-        batch_size_val = data.batch_size if data.batch_size and data.batch_size > 0 else 50
-        
         num_lotes = math.ceil(total_qty / batch_size_val)
+        cart_logger.info("[SYNC:batches] planning_id=%s num=%s batch_size=%s", new_planning.id, num_lotes, batch_size_val)
         
         for i in range(num_lotes):
             # Calculate quantity for this specific batch
@@ -760,6 +779,8 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
             # If it's the last batch, check if it's partial
             if (i + 1) * batch_size_val > total_qty:
                 current_qty = total_qty % batch_size_val
+                if current_qty == 0:
+                    current_qty = batch_size_val
             
             new_lote = models.CartLote(
                 production_order_id=po.id,
@@ -769,8 +790,10 @@ def sync_planning(data: PlanningSyncRequest, db: Session = Depends(get_db)):
                 status="Aguardando"
             )
             db.add(new_lote)
+            cart_logger.info("[SYNC:cart] seq=%s qty=%s planning_id=%s", i + 1, current_qty, new_planning.id)
 
         db.commit()
+        cart_logger.info("[SYNC:done] planning_id=%s num_lotes=%s", new_planning.id, num_lotes)
         return {"status": "synced", "message": "Balanceamento publicado com sucesso!", "planning_id": new_planning.id}
 
     except Exception as e:
@@ -883,10 +906,12 @@ def get_published_plannings(db: Session = Depends(get_db)):
                 continue
             if pso and pso.is_archived:
                 continue
+            planning_timestamp = planning.created_at or getattr(planning, "updated_at", None) or datetime.utcnow()
             versions.append({
                 "planning_id": planning.id,
                 "version_name": planning.version_name,
-                "batch_size": planning.batch_size
+                "batch_size": planning.batch_size,
+                "created_at": planning_timestamp.isoformat()
             })
         if versions:
             ops.append({"product_reference": po.product_reference, "versions": versions})
@@ -1079,6 +1104,7 @@ def start_production(data: dict, db: Session = Depends(get_db)):
         
         # Activate
         planning.is_active = True
+        cart_logger.info("[START] Activating planning=%s po=%s batch_size=%s total_qty=%s", planning.id, planning.production_order_id, planning.batch_size, planning.total_quantity)
 
         # Log Start Event
         db.add(models.ProductionEvent(
@@ -1086,6 +1112,7 @@ def start_production(data: dict, db: Session = Depends(get_db)):
             event_type="start"
         ))
         db.commit()
+        cart_logger.info("[START:done] planning=%s active=%s", planning.id, planning.is_active)
         
         return {
             "status": "started",
@@ -1098,7 +1125,7 @@ def start_production(data: dict, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         db.rollback()
-        print(f"Error starting production: {e}")
+        cart_logger.error("[START:error] planning_id=%s err=%s", data.get("planning_id"), e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1791,7 +1818,7 @@ def get_pending_batches(db: Session = Depends(get_db)):
         # 2. Get Pending Carts for THIS planning session
         carts = db.query(models.CartLote).filter(
             models.CartLote.planning_id == planning.id,
-            models.CartLote.status != "Concluido"
+            models.CartLote.status == "Aguardando"
         ).order_by(models.CartLote.sequence_number).all()
 
         return {
