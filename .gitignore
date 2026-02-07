@@ -30,3 +30,4 @@ logs/
 .crush
 .crush/
 venv/
+.clinerules

@@ -207,6 +207,10 @@
                     class="bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-2 rounded-xl text-[10px] font-black flex items-center gap-2 transition-all border border-purple-500/20">
                     <span class="material-symbols-outlined text-sm">download</span> CARREGAR
                 </button>
+                <button onclick="exportManualPdf()"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-[10px] font-black flex items-center gap-2 shadow-lg">
+                    <span class="material-symbols-outlined text-sm">print</span> MANUAL
+                </button>
                 <button onclick="checkAndSave()"
                     class="bg-[#4CAF50] hover:bg-green-600 text-[#0f1923] px-4 py-2 rounded-xl text-[10px] font-black flex items-center gap-2 shadow-lg">
                     <span class="material-symbols-outlined text-sm">cloud_upload</span> PUBLICAR
@@ -284,7 +288,8 @@
             currentFractionOP: null,
             currentSourceWS: null,
             loadedPsoId: null,
-            productReference: null  // Store OP reference for default naming
+            productReference: null,  // Store OP reference for default naming
+            currentPlanningId: null // Último planning carregado (publicado)
         };
 
         const API_URL = "http://localhost:8001/api";
@@ -502,7 +507,7 @@
                                             </div>
                                             <div class="space-y-2">
                                                 ${op.versions.map(v => `
-                                                     <button onclick="loadBalanceVersion(${v.pso_id}, ${v.planning_id})" 
+                                                     <button onclick="loadBalanceVersion(${v.planning_id})" 
                                                         class="w-full text-left bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-purple-500 rounded-lg p-3 transition-all group">
                                                         <div class="flex justify-between items-center">
                                                             <div class="flex-1">
@@ -563,17 +568,34 @@
             }
         }
 
-        async function loadBalanceVersion(psoId, planningId) {
+        async function loadBalanceVersion(planningId) {
             try {
                 closeLoadBalanceModal();
                 showLoadingState();
 
-                // Fetch the specific planning/balance version
+                // Buscar detalhes do planejamento para obter pso_id e allocations
                 const response = await fetch(`${API_URL}/planning/${planningId}`);
                 const data = await response.json();
 
-                // Load the PSO data first
-                await loadData(psoId);
+                if (!response.ok) {
+                    alert(data.detail || 'Erro ao carregar planejamento.');
+                    showEmptyState();
+                    return;
+                }
+
+                // Garantir pso_id correto antes de carregar dados da OP
+                const resolvedPsoId = data.pso_id;
+                if (!resolvedPsoId) {
+                    alert('Planejamento sem PSO associado.');
+                    showEmptyState();
+                    return;
+                }
+
+                document.getElementById('batch-total-quantity').value = data.total_quantity || 1000;
+
+                // Load the PSO data first (preenche state.ops, seamstresses e psoId)
+                await loadData(resolvedPsoId);
+                state.currentPlanningId = planningId;
 
                 // Then apply the allocations
                 state.pulseDuration = data.pulse_duration;
@@ -627,6 +649,12 @@
                 alert('Erro ao carregar versão do balanceamento');
                 showEmptyState();
             }
+        }
+
+        function exportManualPdf() {
+            if (!state.currentPlanningId) return alert('Carregue um balanceamento!');
+            const url = `${API_URL}/v1/planning/${state.currentPlanningId}/manual-html`;
+            window.open(url, '_blank');
         }
 
         async function deleteBalancing(planningId, versionName) {

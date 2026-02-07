@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -6,13 +7,15 @@ from sqlalchemy import desc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, time
+import os
+import json
+import math
+import logging
 
-# Import local modules
 from database import engine, get_db, Base
 import models
 import extractor
-import math
-import logging
+from fastapi.templating import Jinja2Templates
 
 cart_logger = logging.getLogger("cart_lote")
 if not cart_logger.handlers:
@@ -26,6 +29,15 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SGP Costura API - Sprint 7.0")
 
+# Define o diretório de templates relativo a este arquivo (compatível com Docker e execução local)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates_dir = os.path.join(BASE_DIR, "templates")
+
+# Configuração robusta de caminho (Funciona no Docker e no Windows)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates_dir = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=templates_dir)
+
 # Mount static files
 app.mount("/telas", StaticFiles(directory="telas"), name="telas")
 
@@ -37,10 +49,6 @@ app.add_middleware(
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
 )
-
-import json # Added import
-
-# ... (Imports remain, just ensuring json is there)
 
 # Shift Configuration Helper
 def get_shift_config(db: Session):
@@ -139,10 +147,16 @@ def calculate_working_minutes_with_pauses(
 
 # ==================== System Config Endpoints ====================
 
+class BreakInterval(BaseModel):
+    start: str
+    end: str
+    description: Optional[str] = None
+
+
 class ShiftConfigModel(BaseModel):
     start_time: str
     end_time: str
-    breaks: List[dict] # [{"start": "12:00", "end": "13:00"}]
+    breaks: List[BreakInterval]
 
 @app.post("/api/config/shift")
 def save_shift_config(config: ShiftConfigModel, db: Session = Depends(get_db)):
@@ -162,73 +176,6 @@ def save_shift_config(config: ShiftConfigModel, db: Session = Depends(get_db)):
 def get_shift_config_endpoint(db: Session = Depends(get_db)):
     """Get shift configuration"""
     return get_shift_config(db)
-
-# ==================== Seamstress Management Endpoints ====================
-
-class SeamstressUpdate(BaseModel):
-    name: Optional[str] = None
-    is_active: Optional[bool] = None
-
-@app.get("/api/seamstresses")
-def get_seamstresses(db: Session = Depends(get_db)):
-    """List all seamstresses with status"""
-    seamstresses = db.query(models.Seamstress).all()
-    return [{
-        "id": s.id, 
-        "name": s.name, 
-        "is_active": s.is_active,
-        "status": s.status 
-    } for s in seamstresses]
-
-@app.put("/api/seamstresses/{id}")
-def update_seamstress(id: int, data: SeamstressUpdate, db: Session = Depends(get_db)):
-    """Update seamstress active status"""
-    s = db.query(models.Seamstress).filter(models.Seamstress.id == id).first()
-    if not s:
-        raise HTTPException(status_code=404, detail="Seamstress not found")
-    
-    if data.name:
-        s.name = data.name
-    if data.is_active is not None:
-        s.is_active = data.is_active
-        s.status = "Ativa" if data.is_active else "Inativa" 
-        
-    db.commit()
-    return {"message": "Seamstress updated"}
-
-class SeamstressCreate(BaseModel):
-    name: str
-
-@app.post("/api/seamstresses")
-def create_seamstress(data: SeamstressCreate, db: Session = Depends(get_db)):
-    """Create a new seamstress"""
-    s = models.Seamstress(name=data.name, is_active=True, status="Ativa")
-    db.add(s)
-    db.commit()
-    db.refresh(s)
-    return s
-
-@app.delete("/api/seamstresses/{id}")
-def delete_seamstress(id: int, db: Session = Depends(get_db)):
-    """Delete a seamstress (Protected)"""
-    s = db.query(models.Seamstress).filter(models.Seamstress.id == id).first()
-    if not s:
-        raise HTTPException(status_code=404, detail="Seamstress not found")
-    
-    # Dependency Check: WorkstationAllocations
-    active_allocations = db.query(models.WorkstationAllocation).filter(
-        models.WorkstationAllocation.seamstress_id == id
-    ).first()
-    
-    if active_allocations:
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot delete: Seamstress has active allocations in production history."
-        )
-
-    db.delete(s)
-    db.commit()
-    return {"message": "Seamstress deleted"}
 
 # Seed Seamstresses if empty
 def seed_seamstresses(db: Session):
@@ -1012,6 +959,7 @@ def get_planning_detail(planning_id: int, db: Session = Depends(get_db)):
             "notes": planning.notes,
             "pulse_duration": planning.pulse_duration,
             "batch_size": planning.batch_size,
+            "total_quantity": planning.total_quantity,
             "created_at": planning.created_at.isoformat() if planning.created_at else None,
             "allocations": allocations,
             # New fields for frontend guardrails
@@ -2103,9 +2051,106 @@ def get_pso_analytics(pso_id: int, db: Session = Depends(get_db)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ==================== Manual da Costureira (HTML Print) ====================
+
+@app.get(
+    "/api/v1/planning/{planning_id}/manual-html",
+    response_class=HTMLResponse
+)
+def get_planning_manual_html(
+    planning_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    planning = db.query(models.ProductionPlanning).filter(models.ProductionPlanning.id == planning_id).first()
+    if not planning:
+        raise HTTPException(status_code=404, detail="Planning not found")
+
+    workstations = db.query(models.WorkstationAllocation).filter(
+        models.WorkstationAllocation.planning_id == planning_id
+    ).order_by(models.WorkstationAllocation.id).all()
+
+    if not workstations:
+        raise HTTPException(status_code=400, detail="No allocations found for this planning")
+
+    product_reference = None
+    product_description = None
+    if planning.pso_id:
+        pso = db.query(models.PSO).filter(models.PSO.id == planning.pso_id).first()
+        if pso and pso.product:
+            product_reference = pso.product.reference
+            product_description = pso.product.description
+
+    workstations_payload = []
+    for ws in workstations:
+        ops_alloc = db.query(models.OperationAllocation).filter(
+            models.OperationAllocation.allocation_id == ws.id
+        ).order_by(models.OperationAllocation.id).all()
+
+        operations_payload = []
+        total_minutes = 0.0
+
+        for op_alloc in ops_alloc:
+            op = db.query(models.Operation).filter(models.Operation.id == op_alloc.operation_id).first()
+            seq = op.sequence if op else "-"
+            description = op.description if op else "Operação"
+            machine = op.macro_machine if op else "-"
+            time_min = float(op.final_time) if op and op.final_time is not None else 0.0
+            qty = op_alloc.executed_quantity or 0
+            total_minutes += time_min * qty
+
+            operations_payload.append({
+                "sequence": seq,
+                "description": description,
+                "machine": machine,
+                "time_min": time_min,
+                "quantity": qty,
+                "is_fractioned": op_alloc.is_fractioned,
+            })
+
+        workstations_payload.append({
+            "name": ws.seamstress.name if ws.seamstress else f"Costureira {ws.seamstress_id}",
+            "operations": operations_payload,
+            "total_minutes": round(total_minutes, 2),
+            "total_ops": len(operations_payload),
+        })
+
+    return templates.TemplateResponse(
+        "manual_print.html",
+        {
+            "request": request,
+            "planning": planning,
+            "product_reference": product_reference,
+            "product_description": product_description,
+            "workstations": workstations_payload,
+        },
+    )
+
+
 @app.get("/")
 def health_check():
     return {"status": "ok", "service": "SGP Costura API"}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

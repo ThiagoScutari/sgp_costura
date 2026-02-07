@@ -107,21 +107,28 @@
                         </div>
 
                         <!-- New Interval Form -->
-                        <div class="bg-[#0f1418] p-4 rounded-xl border border-gray-700 mb-4 flex gap-4 items-end">
-                            <div class="flex-1">
+                        <div class="bg-[#0f1418] p-4 rounded-xl border border-gray-700 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                            <div class="md:col-span-1">
                                 <label class="block text-[10px] font-black text-gray-500 mb-1">INÍCIO</label>
                                 <input type="time" id="int-start"
                                     class="w-full bg-[#1b2227] border border-gray-600 rounded-lg p-2 font-bold text-white">
                             </div>
-                            <div class="flex-1">
+                            <div class="md:col-span-1">
                                 <label class="block text-[10px] font-black text-gray-500 mb-1">FIM</label>
                                 <input type="time" id="int-end"
                                     class="w-full bg-[#1b2227] border border-gray-600 rounded-lg p-2 font-bold text-white">
                             </div>
-                            <button onclick="addInterval()"
-                                class="active-action bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-black uppercase text-xs h-[42px]">
-                                Adicionar
-                            </button>
+                            <div class="md:col-span-1">
+                                <label class="block text-[10px] font-black text-gray-500 mb-1">DESCRIÇÃO</label>
+                                <input type="text" id="int-desc" placeholder="Ex.: Café, Almoço"
+                                    class="w-full bg-[#1b2227] border border-gray-600 rounded-lg p-2 font-bold text-white" maxlength="60">
+                            </div>
+                            <div class="md:col-span-1">
+                                <button onclick="addInterval()"
+                                    class="w-full active-action bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-black uppercase text-xs h-[42px]">
+                                    Adicionar
+                                </button>
+                            </div>
                         </div>
 
                         <div id="intervals-list" class="space-y-3">
@@ -307,15 +314,17 @@
         async function addInterval() {
             const start = document.getElementById('int-start').value;
             const end = document.getElementById('int-end').value;
+            const description = document.getElementById('int-desc').value.trim();
             if (!start || !end) return alert("Preencha horário de início e fim");
 
             if (!CURRENT_SHIFT_CONFIG.breaks) CURRENT_SHIFT_CONFIG.breaks = [];
-            CURRENT_SHIFT_CONFIG.breaks.push({ start, end });
+            CURRENT_SHIFT_CONFIG.breaks.push({ start, end, description });
 
             await persistShiftConfig(); // Save to DB
 
             document.getElementById('int-start').value = '';
             document.getElementById('int-end').value = '';
+            document.getElementById('int-desc').value = '';
             await loadShiftConfig();
         }
 
@@ -350,7 +359,10 @@
 
             container.innerHTML = breaks.map((b, idx) => `
                 <div class="flex justify-between items-center bg-[#0f1418] p-3 rounded-xl border border-gray-700">
-                    <span class="font-bold text-sm text-gray-300">☕ ${b.start} - ${b.end}</span>
+                    <div class="space-y-1">
+                        <span class="block font-bold text-sm text-gray-300">☕ ${b.start} - ${b.end}</span>
+                        <span class="block text-xs text-gray-400 font-semibold">${b.description ? b.description : 'Intervalo'}</span>
+                    </div>
                     <button onclick="deleteInterval(${idx})" class="text-red-500 hover:text-red-400 font-bold text-[10px] uppercase active-action">Excluir</button>
                 </div>
             `).join('');
