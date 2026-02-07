@@ -9,3 +9,24 @@ venv/
 .DS_Store
 logs_api.txt
 *.log
+# Ignorar vídeos
+01_business_documentarion/VIDEOS/
+*.mp4
+*.mov
+
+# Ignorar lixo do Python
+__pycache__/
+*.pyc
+
+# Ignorar configs de editor
+.sqls.yml
+pyrightconfig.json
+
+# Ignorar arquivos de teste
+tests/
+crush.json
+pyrightconfig.json
+logs/
+.crush
+.crush/
+venv/

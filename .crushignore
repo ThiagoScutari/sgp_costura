@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+06_examples/
+logs_api.txt
+docker/
